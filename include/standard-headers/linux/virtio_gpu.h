@@ -51,6 +51,12 @@
  */
 #define VIRTIO_GPU_F_EDID                1
 
+/*
+ * VIRTIO_GPU_CMD_RESOURCE_CREATE_2D_SHARED
+ * VIRTIO_GPU_CMD_RESOURCE_CREATE_3D_SHARED
+ */
+#define VIRTIO_GPU_F_RESOURCE_SHARED     2
+
 enum virtio_gpu_ctrl_type {
 	VIRTIO_GPU_UNDEFINED = 0,
 
@@ -66,6 +72,7 @@ enum virtio_gpu_ctrl_type {
 	VIRTIO_GPU_CMD_GET_CAPSET_INFO,
 	VIRTIO_GPU_CMD_GET_CAPSET,
 	VIRTIO_GPU_CMD_GET_EDID,
+	VIRTIO_GPU_CMD_RESOURCE_CREATE_2D_SHARED,
 
 	/* 3d commands */
 	VIRTIO_GPU_CMD_CTX_CREATE = 0x0200,
@@ -76,6 +83,7 @@ enum virtio_gpu_ctrl_type {
 	VIRTIO_GPU_CMD_TRANSFER_TO_HOST_3D,
 	VIRTIO_GPU_CMD_TRANSFER_FROM_HOST_3D,
 	VIRTIO_GPU_CMD_SUBMIT_3D,
+	VIRTIO_GPU_CMD_RESOURCE_CREATE_3D_SHARED,
 
 	/* cursor commands */
 	VIRTIO_GPU_CMD_UPDATE_CURSOR = 0x0300,
@@ -95,6 +103,7 @@ enum virtio_gpu_ctrl_type {
 	VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID,
 	VIRTIO_GPU_RESP_ERR_INVALID_CONTEXT_ID,
 	VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER,
+	VIRTIO_GPU_RESP_ERR_NO_BACKING_STORAGE,
 };
 
 #define VIRTIO_GPU_FLAG_FENCE (1 << 0)
@@ -143,6 +152,7 @@ struct virtio_gpu_resource_unref {
 };
 
 /* VIRTIO_GPU_CMD_RESOURCE_CREATE_2D: create a 2d resource with a format */
+/* VIRTIO_GPU_CMD_RESOURCE_CREATE_2D_SHARED */
 struct virtio_gpu_resource_create_2d {
 	struct virtio_gpu_ctrl_hdr hdr;
 	uint32_t resource_id;
@@ -226,6 +236,7 @@ struct virtio_gpu_transfer_host_3d {
 };
 
 /* VIRTIO_GPU_CMD_RESOURCE_CREATE_3D */
+/* VIRTIO_GPU_CMD_RESOURCE_CREATE_3D_SHARED */
 #define VIRTIO_GPU_RESOURCE_FLAG_Y_0_TOP (1 << 0)
 struct virtio_gpu_resource_create_3d {
 	struct virtio_gpu_ctrl_hdr hdr;
