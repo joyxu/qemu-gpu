@@ -39,8 +39,14 @@
 
 #define VIRTIO_ID_GPU 16
 
+typedef enum virtio_gpu_resource_type {
+    VIRTIO_GPU_RES_TYPE_DEFAULT = 0,
+    VIRTIO_GPU_RES_TYPE_SHARED
+} virtio_gpu_resource_type;
+
 struct virtio_gpu_simple_resource {
     uint32_t resource_id;
+    virtio_gpu_resource_type type;
     uint32_t width;
     uint32_t height;
     uint32_t stride;
@@ -51,6 +57,12 @@ struct virtio_gpu_simple_resource {
     uint32_t scanout_bitmask;
     pixman_image_t *image;
     uint64_t hostmem;
+
+    /* for VIRTIO_GPU_RES_TYPE_SHARED */
+    int dmabuf_fd;
+    size_t remapsz;
+    uint8_t *remapped;
+
     QTAILQ_ENTRY(virtio_gpu_simple_resource) next;
 };
 
@@ -74,6 +86,7 @@ enum virtio_gpu_base_conf_flags {
     VIRTIO_GPU_FLAG_VIRGL_ENABLED = 1,
     VIRTIO_GPU_FLAG_STATS_ENABLED,
     VIRTIO_GPU_FLAG_EDID_ENABLED,
+    VIRTIO_GPU_FLAG_SHARED_ENABLED,
 };
 
 #define virtio_gpu_virgl_enabled(_cfg) \
@@ -82,6 +95,8 @@ enum virtio_gpu_base_conf_flags {
     (_cfg.flags & (1 << VIRTIO_GPU_FLAG_STATS_ENABLED))
 #define virtio_gpu_edid_enabled(_cfg) \
     (_cfg.flags & (1 << VIRTIO_GPU_FLAG_EDID_ENABLED))
+#define virtio_gpu_shared_enabled(_cfg) \
+    (_cfg.flags & (1 << VIRTIO_GPU_FLAG_SHARED_ENABLED))
 
 struct virtio_gpu_base_conf {
     uint32_t max_outputs;
@@ -213,6 +228,11 @@ int virtio_gpu_create_mapping_iov(VirtIOGPU *g,
 void virtio_gpu_cleanup_mapping_iov(VirtIOGPU *g,
                                     struct iovec *iov, uint32_t count);
 void virtio_gpu_process_cmdq(VirtIOGPU *g);
+
+/* virtio-gpu-udmabuf.c */
+bool virtio_gpu_have_udmabuf(void);
+void virtio_gpu_init_udmabuf(struct virtio_gpu_simple_resource *res);
+void virtio_gpu_fini_udmabuf(struct virtio_gpu_simple_resource *res);
 
 /* virtio-gpu-3d.c */
 void virtio_gpu_virgl_process_cmd(VirtIOGPU *g,

@@ -20,6 +20,7 @@
 #include "sysemu/sysemu.h"
 #include "hw/virtio/virtio.h"
 #include "migration/qemu-file-types.h"
+#include "migration/blocker.h"
 #include "hw/virtio/virtio-gpu.h"
 #include "hw/virtio/virtio-gpu-bswap.h"
 #include "hw/virtio/virtio-gpu-pixman.h"
@@ -180,7 +181,7 @@ virtio_gpu_find_check_resource(VirtIOGPU *g, uint32_t resource_id,
         return NULL;
     }
 
-    if (require_backing) {
+    if (res->type == VIRTIO_GPU_RES_TYPE_SHARED || require_backing) {
         if (!res->iov || !res->image) {
             qemu_log_mask(LOG_GUEST_ERROR, "%s: no backing storage %d\n",
                           caller, resource_id);
@@ -324,6 +325,9 @@ static void virtio_gpu_resource_create_2d(VirtIOGPU *g,
     res->height = c2d.height;
     res->format = c2d.format;
     res->resource_id = c2d.resource_id;
+    if (cmd->cmd_hdr.type == VIRTIO_GPU_CMD_RESOURCE_CREATE_2D_SHARED) {
+        res->type = VIRTIO_GPU_RES_TYPE_SHARED;
+    }
 
     pformat = virtio_gpu_get_pixman_format(c2d.format);
     if (!pformat) {
@@ -336,12 +340,19 @@ static void virtio_gpu_resource_create_2d(VirtIOGPU *g,
     }
 
     res->stride = calc_image_stride(pformat, res->width);
-    res->hostmem = res->stride * res->height;
-    if (res->hostmem + g->hostmem < g->conf_max_hostmem) {
-        res->image = pixman_image_create_bits(pformat,
-                                              c2d.width,
-                                              c2d.height,
-                                              NULL, 0);
+    if (res->type == VIRTIO_GPU_RES_TYPE_SHARED) {
+        pixman_color_t red = {
+            .red = 0xffff /* visual debugging ;) */
+        };
+        res->image = pixman_image_create_solid_fill(&red);
+   } else {
+        res->hostmem = res->stride * res->height;
+        if (res->hostmem + g->hostmem < g->conf_max_hostmem) {
+            res->image = pixman_image_create_bits(pformat,
+                                                  c2d.width,
+                                                  c2d.height,
+                                                  NULL, 0);
+        }
     }
 
     if (!res->image) {
@@ -442,6 +453,10 @@ static void virtio_gpu_transfer_to_host_2d(VirtIOGPU *g,
     res = virtio_gpu_find_check_resource(g, t2d.resource_id, true,
                                          __func__, &cmd->error);
     if (!res) {
+        return;
+    }
+
+    if (res->type == VIRTIO_GPU_RES_TYPE_SHARED) {
         return;
     }
 
@@ -724,6 +739,9 @@ static void virtio_gpu_cleanup_mapping(VirtIOGPU *g,
     res->iov_cnt = 0;
     g_free(res->addrs);
     res->addrs = NULL;
+    if (res->type == VIRTIO_GPU_RES_TYPE_SHARED) {
+        virtio_gpu_fini_udmabuf(res);
+    }
 }
 
 static void
@@ -758,6 +776,10 @@ virtio_gpu_resource_attach_backing(VirtIOGPU *g,
     }
 
     res->iov_cnt = ab.nr_entries;
+
+    if (res->type == VIRTIO_GPU_RES_TYPE_SHARED) {
+        virtio_gpu_init_udmabuf(res);
+    }
 }
 
 static void
@@ -792,6 +814,12 @@ static void virtio_gpu_simple_process_cmd(VirtIOGPU *g,
     case VIRTIO_GPU_CMD_GET_EDID:
         virtio_gpu_get_edid(g, cmd);
         break;
+    case VIRTIO_GPU_CMD_RESOURCE_CREATE_2D_SHARED:
+        if (!virtio_gpu_shared_enabled(g->parent_obj.conf)) {
+            cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+            break;
+        }
+        /* fall through */
     case VIRTIO_GPU_CMD_RESOURCE_CREATE_2D:
         virtio_gpu_resource_create_2d(g, cmd);
         break;
@@ -1006,6 +1034,10 @@ static int virtio_gpu_save(QEMUFile *f, void *opaque, size_t size,
 
     QTAILQ_FOREACH(res, &g->reslist, next) {
         qemu_put_be32(f, res->resource_id);
+        if (virtio_gpu_shared_enabled(g->parent_obj.conf)) {
+            qemu_put_be32(f, res->type);
+            qemu_put_be32(f, res->stride);
+        }
         qemu_put_be32(f, res->width);
         qemu_put_be32(f, res->height);
         qemu_put_be32(f, res->format);
@@ -1014,8 +1046,15 @@ static int virtio_gpu_save(QEMUFile *f, void *opaque, size_t size,
             qemu_put_be64(f, res->addrs[i]);
             qemu_put_be32(f, res->iov[i].iov_len);
         }
-        qemu_put_buffer(f, (void *)pixman_image_get_data(res->image),
-                        pixman_image_get_stride(res->image) * res->height);
+        switch (res->type) {
+        case VIRTIO_GPU_RES_TYPE_DEFAULT:
+            qemu_put_buffer(f, (void *)pixman_image_get_data(res->image),
+                            pixman_image_get_stride(res->image) * res->height);
+            break;
+        case VIRTIO_GPU_RES_TYPE_SHARED:
+            /* nothing, data is in guest ram */
+            break;
+        }
     }
     qemu_put_be32(f, 0); /* end of list */
 
@@ -1042,38 +1081,56 @@ static int virtio_gpu_load(QEMUFile *f, void *opaque, size_t size,
 
         res = g_new0(struct virtio_gpu_simple_resource, 1);
         res->resource_id = resource_id;
+        if (virtio_gpu_shared_enabled(g->parent_obj.conf)) {
+            res->type = qemu_get_be32(f);
+            res->stride = qemu_get_be32(f);
+        } else {
+            res->type = VIRTIO_GPU_RES_TYPE_DEFAULT;
+        }
         res->width = qemu_get_be32(f);
         res->height = qemu_get_be32(f);
         res->format = qemu_get_be32(f);
         res->iov_cnt = qemu_get_be32(f);
 
-        /* allocate */
-        pformat = virtio_gpu_get_pixman_format(res->format);
-        if (!pformat) {
-            g_free(res);
-            return -EINVAL;
-        }
-        res->image = pixman_image_create_bits(pformat,
-                                              res->width, res->height,
-                                              NULL, 0);
-        if (!res->image) {
-            g_free(res);
-            return -EINVAL;
-        }
-
-        res->stride = calc_image_stride(pformat, res->width);
-        res->hostmem = res->stride * res->height;
-
         res->addrs = g_new(uint64_t, res->iov_cnt);
         res->iov = g_new(struct iovec, res->iov_cnt);
-
-        /* read data */
         for (i = 0; i < res->iov_cnt; i++) {
             res->addrs[i] = qemu_get_be64(f);
             res->iov[i].iov_len = qemu_get_be32(f);
         }
-        qemu_get_buffer(f, (void *)pixman_image_get_data(res->image),
-                        pixman_image_get_stride(res->image) * res->height);
+
+        switch (res->type) {
+        case VIRTIO_GPU_RES_TYPE_DEFAULT:
+            /* allocate host buffer */
+            pformat = virtio_gpu_get_pixman_format(res->format);
+            if (!pformat) {
+                g_free(res);
+                return -EINVAL;
+            }
+            res->image = pixman_image_create_bits(pformat,
+                                                  res->width, res->height,
+                                                  NULL, 0);
+            if (!res->image) {
+                g_free(res);
+                return -EINVAL;
+            }
+
+            res->stride = calc_image_stride(pformat, res->width);
+            res->hostmem = res->stride * res->height;
+
+            /* read data */
+            qemu_get_buffer(f, (void *)pixman_image_get_data(res->image),
+                            pixman_image_get_stride(res->image) * res->height);
+            break;
+
+        case VIRTIO_GPU_RES_TYPE_SHARED:
+            virtio_gpu_init_udmabuf(res);
+            if (!res->image) {
+                g_free(res);
+                return -EINVAL;
+            }
+            break;
+        }
 
         /* restore mapping */
         for (i = 0; i < res->iov_cnt; i++) {
@@ -1151,6 +1208,19 @@ static void virtio_gpu_device_realize(DeviceState *qdev, Error **errp)
         VIRTIO_GPU_BASE(g)->virtio_config.num_capsets =
             virtio_gpu_virgl_get_num_capsets(g);
 #endif
+    }
+
+    if (virtio_gpu_shared_enabled(g->parent_obj.conf)) {
+        if (!virtio_gpu_have_udmabuf()) {
+            error_setg(errp, "shared not supported by host (requires udmabuf)");
+            return;
+        }
+
+        /* FIXME: to be investigated ... */
+        if (virtio_gpu_virgl_enabled(g->parent_obj.conf)) {
+            error_setg(errp, "shared and virgl are not compatible (yet)");
+            return;
+        }
     }
 
     if (!virtio_gpu_base_device_realize(qdev,
@@ -1269,6 +1339,8 @@ static Property virtio_gpu_properties[] = {
     DEFINE_PROP_BIT("stats", VirtIOGPU, parent_obj.conf.flags,
                     VIRTIO_GPU_FLAG_STATS_ENABLED, false),
 #endif
+    DEFINE_PROP_BIT("shared", VirtIOGPU, parent_obj.conf.flags,
+                    VIRTIO_GPU_FLAG_SHARED_ENABLED, false),
     DEFINE_PROP_END_OF_LIST(),
 };
 
