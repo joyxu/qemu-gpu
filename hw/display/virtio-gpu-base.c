@@ -214,6 +214,9 @@ virtio_gpu_base_get_features(VirtIODevice *vdev, uint64_t features,
     if (virtio_gpu_context_init_enabled(g->conf)) {
         features |= (1 << VIRTIO_GPU_F_CONTEXT_INIT);
     }
+    if (virtio_gpu_hostmem_enabled(g->conf)) {
+        features |= (1 << VIRTIO_GPU_F_HOSTMEM);
+    }
 
     return features;
 }
