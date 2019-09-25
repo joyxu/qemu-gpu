@@ -1213,11 +1213,20 @@ static void virtio_gpu_device_realize(DeviceState *qdev, Error **errp)
         }
     }
 
+    if (virtio_gpu_hostmem_enabled(g->parent_obj.conf)) {
+        /* FIXME: to be investigated ... */
+        if (virtio_gpu_virgl_enabled(g->parent_obj.conf)) {
+            error_setg(errp, "hostmem and virgl are not compatible (yet)");
+            return;
+        }
+    }
+
     if (virtio_gpu_shared_enabled(g->parent_obj.conf) ||
-        virtio_gpu_blob_enabled(g->parent_obj.conf)) {
+        virtio_gpu_blob_enabled(g->parent_obj.conf) ||
+        virtio_gpu_hostmem_enabled(g->parent_obj.conf)) {
         /* FIXME: must xfer resource type somehow */
         error_setg(&g->parent_obj.migration_blocker,
-                   "shared/blob is not migratable (yet)");
+                   "shared/blob/hostmem is not migratable (yet)");
         migrate_add_blocker(g->parent_obj.migration_blocker, &local_err);
         if (local_err) {
             error_propagate(errp, local_err);
@@ -1344,6 +1353,7 @@ static Property virtio_gpu_properties[] = {
 #endif
     DEFINE_PROP_BIT("shared", VirtIOGPU, parent_obj.conf.flags,
                     VIRTIO_GPU_FLAG_SHARED_ENABLED, false),
+    DEFINE_PROP_SIZE("hostmem", VirtIOGPU, parent_obj.conf.hostmem, 0),
     DEFINE_PROP_END_OF_LIST(),
 };
 
