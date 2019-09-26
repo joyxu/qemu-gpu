@@ -1211,10 +1211,13 @@ static void virtio_gpu_device_realize(DeviceState *qdev, Error **errp)
             error_setg(errp, "shared and virgl are not compatible (yet)");
             return;
         }
+    }
 
+    if (virtio_gpu_shared_enabled(g->parent_obj.conf) ||
+        virtio_gpu_blob_enabled(g->parent_obj.conf)) {
         /* FIXME: must xfer resource type somehow */
         error_setg(&g->parent_obj.migration_blocker,
-                   "shared is not migratable (yet)");
+                   "shared/blob is not migratable (yet)");
         migrate_add_blocker(g->parent_obj.migration_blocker, &local_err);
         if (local_err) {
             error_propagate(errp, local_err);
