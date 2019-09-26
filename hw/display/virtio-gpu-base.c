@@ -191,6 +191,9 @@ virtio_gpu_base_get_features(VirtIODevice *vdev, uint64_t features,
     if (virtio_gpu_shared_enabled(g->conf)) {
         features |= (1 << VIRTIO_GPU_F_RESOURCE_SHARED);
     }
+    if (virtio_gpu_blob_enabled(g->conf)) {
+        features |= (1 << VIRTIO_GPU_F_RESOURCE_BLOB);
+    }
 
     return features;
 }
