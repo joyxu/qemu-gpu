@@ -20,6 +20,7 @@
 #include "sysemu/sysemu.h"
 #include "hw/virtio/virtio.h"
 #include "migration/qemu-file-types.h"
+#include "migration/blocker.h"
 #include "hw/virtio/virtio-gpu.h"
 #include "hw/virtio/virtio-gpu-bswap.h"
 #include "hw/virtio/virtio-gpu-pixman.h"
@@ -1155,6 +1156,7 @@ static void virtio_gpu_device_realize(DeviceState *qdev, Error **errp)
 {
     VirtIODevice *vdev = VIRTIO_DEVICE(qdev);
     VirtIOGPU *g = VIRTIO_GPU(qdev);
+    Error *local_err = NULL;
     bool have_virgl;
 
 #if !defined(CONFIG_VIRGL) || defined(HOST_WORDS_BIGENDIAN)
@@ -1169,6 +1171,18 @@ static void virtio_gpu_device_realize(DeviceState *qdev, Error **errp)
         VIRTIO_GPU_BASE(g)->virtio_config.num_capsets =
             virtio_gpu_virgl_get_num_capsets(g);
 #endif
+    }
+
+    if (virtio_gpu_blob_enabled(g->parent_obj.conf)) {
+        /* FIXME: must xfer resource type somehow */
+        error_setg(&g->parent_obj.migration_blocker,
+                   "blob is not migratable (yet)");
+        migrate_add_blocker(g->parent_obj.migration_blocker, &local_err);
+        if (local_err) {
+            error_propagate(errp, local_err);
+            error_free(g->parent_obj.migration_blocker);
+            return;
+        }
     }
 
     if (!virtio_gpu_base_device_realize(qdev,
