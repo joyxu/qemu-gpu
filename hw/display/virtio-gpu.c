@@ -817,6 +817,38 @@ virtio_gpu_resource_detach_backing(VirtIOGPU *g,
     virtio_gpu_cleanup_mapping(g, res);
 }
 
+static void virtio_gpu_metadata_query(VirtIOGPU *g,
+                                      struct virtio_gpu_ctrl_command *cmd)
+{
+    struct virtio_gpu_metadata_message query;
+    struct virtio_gpu_metadata_message info;
+
+    VIRTIO_GPU_FILL_CMD(query);
+    virtio_gpu_bswap_32(&query, sizeof(query) - sizeof(query.message));
+
+    memset(&info, 0, sizeof(info));
+    info.hdr.type = VIRTIO_GPU_RESP_OK_METADATA_INFO;
+
+    if (query.size > sizeof(query.message)) {
+        cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+        return;
+    }
+
+    /* compose dummy reply for testing */
+    {
+        int i;
+
+        for (i = 0; i < query.size; i++) {
+            info.message[i] = query.message[query.size - i - 1];
+        }
+        info.size = cpu_to_le32(query.size);
+    }
+    fprintf(stderr, "%s: << %d \"%s\"\n", __func__, query.size, query.message);
+    fprintf(stderr, "%s: >> %d \"%s\"\n", __func__, info.size, info.message);
+
+    virtio_gpu_ctrl_response(g, cmd, &info.hdr, sizeof(info));
+}
+
 static void virtio_gpu_simple_process_cmd(VirtIOGPU *g,
                                           struct virtio_gpu_ctrl_command *cmd)
 {
@@ -856,6 +888,13 @@ static void virtio_gpu_simple_process_cmd(VirtIOGPU *g,
         break;
     case VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING:
         virtio_gpu_resource_detach_backing(g, cmd);
+        break;
+    case VIRTIO_GPU_CMD_METADATA_QUERY:
+        if (!virtio_gpu_metadata_enabled(g->parent_obj.conf)) {
+            cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+            break;
+        }
+        virtio_gpu_metadata_query(g, cmd);
         break;
     default:
         qemu_log_mask(LOG_GUEST_ERROR, "%s: unknown command 0x%x\n",
@@ -1354,6 +1393,8 @@ static Property virtio_gpu_properties[] = {
     DEFINE_PROP_BIT("shared", VirtIOGPU, parent_obj.conf.flags,
                     VIRTIO_GPU_FLAG_SHARED_ENABLED, false),
     DEFINE_PROP_SIZE("hostmem", VirtIOGPU, parent_obj.conf.hostmem, 0),
+    DEFINE_PROP_BIT("metadata", VirtIOGPU, parent_obj.conf.flags,
+                    VIRTIO_GPU_FLAG_METADATA_ENABLED, false),
     DEFINE_PROP_END_OF_LIST(),
 };
 
