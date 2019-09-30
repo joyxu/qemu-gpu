@@ -96,6 +96,7 @@ enum virtio_gpu_base_conf_flags {
     VIRTIO_GPU_FLAG_EDID_ENABLED,
     VIRTIO_GPU_FLAG_SHARED_ENABLED,
     VIRTIO_GPU_FLAG_BLOB_ENABLED,
+    VIRTIO_GPU_FLAG_METADATA_ENABLED,
 };
 
 #define virtio_gpu_virgl_enabled(_cfg) \
@@ -110,6 +111,8 @@ enum virtio_gpu_base_conf_flags {
     (_cfg.flags & (1 << VIRTIO_GPU_FLAG_BLOB_ENABLED))
 #define virtio_gpu_hostmem_enabled(_cfg) \
     (_cfg.hostmem > 0)
+#define virtio_gpu_metadata_enabled(_cfg) \
+    (_cfg.flags & (1 << VIRTIO_GPU_FLAG_METADATA_ENABLED))
 
 struct virtio_gpu_base_conf {
     uint32_t max_outputs;
