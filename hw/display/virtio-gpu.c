@@ -1406,6 +1406,8 @@ static Property virtio_gpu_properties[] = {
 #endif
     DEFINE_PROP_BIT("shared", VirtIOGPU, parent_obj.conf.flags,
                     VIRTIO_GPU_FLAG_SHARED_ENABLED, false),
+    DEFINE_PROP_BIT("blob", VirtIOGPU, parent_obj.conf.flags,
+                    VIRTIO_GPU_FLAG_BLOB_ENABLED, false),
     DEFINE_PROP_SIZE("hostmem", VirtIOGPU, parent_obj.conf.hostmem, 0),
     DEFINE_PROP_BIT("metadata", VirtIOGPU, parent_obj.conf.flags,
                     VIRTIO_GPU_FLAG_METADATA_ENABLED, false),
