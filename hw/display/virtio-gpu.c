@@ -358,6 +358,72 @@ static void virtio_gpu_resource_create_2d(VirtIOGPU *g,
     g->hostmem += res->hostmem;
 }
 
+static void virtio_gpu_resource_create_blob(VirtIOGPU *g,
+                                            struct virtio_gpu_ctrl_command *cmd)
+{
+    struct virtio_gpu_simple_resource *res;
+    struct virtio_gpu_resource_create_blob cblob;
+
+    VIRTIO_GPU_FILL_CMD(cblob);
+    virtio_gpu_create_blob_bswap(&cblob);
+    trace_virtio_gpu_cmd_res_create_blob(cblob.resource_id, cblob.size);
+
+    if (cblob.resource_id == 0) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: resource id 0 is not allowed\n",
+                      __func__);
+        cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID;
+        return;
+    }
+
+    res = virtio_gpu_find_resource(g, cblob.resource_id);
+    if (res) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: resource already exists %d\n",
+                      __func__, cblob.resource_id);
+        cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID;
+        return;
+    }
+
+    switch (cblob.flags & VIRTIO_GPU_RESOURCE_FLAG_STORAGE_MASK) {
+    case VIRTIO_GPU_RESOURCE_FLAG_STORAGE_SHADOW:
+        break;
+    default:
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: invalid storage flags\n",
+                      __func__);
+        cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+        return;
+    }
+
+    switch (cblob.flags & VIRTIO_GPU_RESOURCE_FLAG_ALLOC_MASK) {
+    case VIRTIO_GPU_RESOURCE_FLAG_ALLOC_DUMB:
+        break;
+    default:
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: invalid allocation flags\n",
+                      __func__);
+        cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+        return;
+    }
+
+    res = g_new0(struct virtio_gpu_simple_resource, 1);
+    res->resource_id = cblob.resource_id;
+
+    res->blob_size = cblob.size;
+    res->hostmem = cblob.size;
+    if (res->hostmem + g->hostmem < g->conf_max_hostmem) {
+        res->blob = g_try_malloc(res->blob_size);
+    }
+    if (!res->blob) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: resource creation failed %d %" PRId64 "\n",
+                      __func__, cblob.resource_id, cblob.size);
+        g_free(res);
+        cmd->error = VIRTIO_GPU_RESP_ERR_OUT_OF_MEMORY;
+        return;
+    }
+
+    QTAILQ_INSERT_HEAD(&g->reslist, res, next);
+    g->hostmem += res->hostmem;
+}
+
 static void virtio_gpu_disable_scanout(VirtIOGPU *g, int scanout_id)
 {
     struct virtio_gpu_scanout *scanout = &g->parent_obj.scanout[scanout_id];
@@ -811,6 +877,13 @@ static void virtio_gpu_simple_process_cmd(VirtIOGPU *g,
         break;
     case VIRTIO_GPU_CMD_RESOURCE_CREATE_2D:
         virtio_gpu_resource_create_2d(g, cmd);
+        break;
+    case VIRTIO_GPU_CMD_RESOURCE_CREATE_BLOB:
+        if (!virtio_gpu_blob_enabled(g->parent_obj.conf)) {
+            cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+            break;
+        }
+        virtio_gpu_resource_create_blob(g, cmd);
         break;
     case VIRTIO_GPU_CMD_RESOURCE_UNREF:
         virtio_gpu_resource_unref(g, cmd);

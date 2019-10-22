@@ -51,6 +51,10 @@ struct virtio_gpu_simple_resource {
     uint32_t scanout_bitmask;
     pixman_image_t *image;
     uint64_t hostmem;
+
+    uint64_t blob_size;
+    void *blob;
+
     QTAILQ_ENTRY(virtio_gpu_simple_resource) next;
 };
 
