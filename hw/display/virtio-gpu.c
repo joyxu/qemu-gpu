@@ -186,7 +186,7 @@ virtio_gpu_find_check_resource(VirtIOGPU *g, uint32_t resource_id,
             qemu_log_mask(LOG_GUEST_ERROR, "%s: no backing storage %d\n",
                           caller, resource_id);
             if (error) {
-                *error = VIRTIO_GPU_RESP_ERR_UNSPEC;
+                *error = VIRTIO_GPU_RESP_ERR_NO_BACKING_STORAGE;
             }
             return NULL;
         }
