@@ -581,6 +581,17 @@ static void virtio_gpu_resource_flush(VirtIOGPU *g,
         return;
     }
 
+    /* hack alert: unconditional fullscreen update for blob resources */
+    if (res->blob_size) {
+        for (i = 0; i < g->parent_obj.conf.max_outputs; i++) {
+            if (!(res->scanout_bitmask & (1 << i))) {
+                continue;
+            }
+            dpy_gfx_update_full(g->parent_obj.scanout[i].con);
+        }
+        return;
+    }
+
     if (rf.r.x > res->width ||
         rf.r.y > res->height ||
         rf.r.width > res->width ||
