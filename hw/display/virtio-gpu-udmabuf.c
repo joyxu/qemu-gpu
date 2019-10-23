@@ -135,10 +135,14 @@ void virtio_gpu_init_udmabuf(struct virtio_gpu_simple_resource *res)
         pdata = res->remapped;
     }
 
-    qemu_pixman_image_unref(res->image);
-    res->image = pixman_image_create_bits(pformat,
-                                          res->width, res->height,
-                                          pdata, res->stride);
+    if (res->type == VIRTIO_GPU_RES_TYPE_SHARED) {
+        res->blob = pdata;
+    } else {
+        qemu_pixman_image_unref(res->image);
+        res->image = pixman_image_create_bits(pformat,
+                                              res->width, res->height,
+                                              pdata, res->stride);
+    }
 }
 
 void virtio_gpu_fini_udmabuf(struct virtio_gpu_simple_resource *res)
