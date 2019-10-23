@@ -74,7 +74,7 @@ static void virtio_gpu_create_udmabuf(struct virtio_gpu_simple_resource *res)
 
 static void virtio_gpu_remap_udmabuf(struct virtio_gpu_simple_resource *res)
 {
-    if (res->blob) {
+    if (res->blob_size) {
         res->remapsz = res->blob_size;
     } else {
         res->remapsz = res->stride * res->height;
@@ -139,7 +139,7 @@ void virtio_gpu_init_udmabuf(struct virtio_gpu_simple_resource *res)
         pdata = res->remapped;
     }
 
-    if (res->type == VIRTIO_GPU_RES_TYPE_SHARED) {
+    if (res->blob_size) {
         res->blob = pdata;
     } else {
         qemu_pixman_image_unref(res->image);
