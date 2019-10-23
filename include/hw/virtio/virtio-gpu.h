@@ -46,6 +46,7 @@ typedef enum virtio_gpu_resource_type {
 
 struct virtio_gpu_simple_resource {
     uint32_t resource_id;
+    uint32_t magic_cookie;
     virtio_gpu_resource_type type;
     uint32_t width;
     uint32_t height;

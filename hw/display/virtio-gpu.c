@@ -195,6 +195,19 @@ virtio_gpu_find_check_resource(VirtIOGPU *g, uint32_t resource_id,
     return res;
 }
 
+static struct virtio_gpu_simple_resource *
+virtio_gpu_alloc_resource(VirtIOGPU *g, uint32_t resource_id)
+{
+    struct virtio_gpu_simple_resource *res;
+
+    res = g_new0(struct virtio_gpu_simple_resource, 1);
+    res->resource_id = resource_id;
+    res->magic_cookie = 0xdeadbeef;
+    res->dmabuf_fd = -1;
+
+    return res;
+}
+
 void virtio_gpu_ctrl_response(VirtIOGPU *g,
                               struct virtio_gpu_ctrl_command *cmd,
                               struct virtio_gpu_ctrl_hdr *resp,
@@ -319,7 +332,7 @@ static void virtio_gpu_resource_create_2d(VirtIOGPU *g,
         return;
     }
 
-    res = g_new0(struct virtio_gpu_simple_resource, 1);
+    res = virtio_gpu_alloc_resource(g, c2d.resource_id);
 
     res->width = c2d.width;
     res->height = c2d.height;
@@ -413,6 +426,7 @@ static void virtio_gpu_resource_destroy(VirtIOGPU *g,
     virtio_gpu_cleanup_mapping(g, res);
     QTAILQ_REMOVE(&g->reslist, res, next);
     g->hostmem -= res->hostmem;
+    assert(res->magic_cookie == 0xdeadbeef);
     g_free(res);
 }
 
@@ -1125,7 +1139,7 @@ static int virtio_gpu_load(QEMUFile *f, void *opaque, size_t size,
             return -EINVAL;
         }
 
-        res = g_new0(struct virtio_gpu_simple_resource, 1);
+        res = virtio_gpu_alloc_resource(g, resource_id);
         res->resource_id = resource_id;
         res->width = qemu_get_be32(f);
         res->height = qemu_get_be32(f);
