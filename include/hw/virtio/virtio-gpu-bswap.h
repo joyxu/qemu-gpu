@@ -60,6 +60,17 @@ virtio_gpu_t2d_bswap(struct virtio_gpu_transfer_to_host_2d *t2d)
 }
 
 static inline void
+virtio_gpu_tb_bswap(struct virtio_gpu_transfer_to_host_blob *tb)
+{
+    virtio_gpu_ctrl_hdr_bswap(&tb->hdr);
+    le64_to_cpus(&tb->offset);
+    le32_to_cpus(&tb->resource_id);
+    le32_to_cpus(&tb->linelength);
+    le32_to_cpus(&tb->linecount);
+    le32_to_cpus(&tb->stride);
+}
+
+static inline void
 virtio_gpu_create_blob_bswap(struct virtio_gpu_resource_create_blob *cblob)
 {
     virtio_gpu_ctrl_hdr_bswap(&cblob->hdr);

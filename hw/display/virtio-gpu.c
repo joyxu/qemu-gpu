@@ -571,6 +571,60 @@ static void virtio_gpu_transfer_to_host_2d(VirtIOGPU *g,
     }
 }
 
+static void
+virtio_gpu_transfer_to_host_blob(VirtIOGPU *g,
+                                 struct virtio_gpu_ctrl_command *cmd)
+{
+    struct virtio_gpu_simple_resource *res;
+    struct virtio_gpu_transfer_to_host_blob tb;
+    uint64_t offset;
+    uint32_t line;
+
+    VIRTIO_GPU_FILL_CMD(tb);
+    virtio_gpu_tb_bswap(&tb);
+    trace_virtio_gpu_cmd_res_xfer_toh_blob(tb.resource_id);
+
+    res = virtio_gpu_find_check_resource(g, tb.resource_id, true,
+                                         __func__, &cmd->error);
+    if (!res) {
+        return;
+    }
+
+    if (res->type == VIRTIO_GPU_RES_TYPE_SHARED) {
+        return;
+    }
+
+    if (tb.linelength != tb.stride) {
+        for (line = 0; line < tb.linecount; line++) {
+            offset = tb.offset + line * tb.stride;
+            if (offset > res->blob_size) {
+                goto err;
+            }
+            if (offset + tb.linelength > res->blob_size) {
+                goto err;
+            }
+            iov_to_buf(res->iov, res->iov_cnt, offset,
+                       res->blob + offset,
+                       tb.linelength);
+        }
+    } else {
+        if (tb.offset > res->blob_size) {
+            goto err;
+        }
+        if (tb.offset + tb.linelength * tb.linecount > res->blob_size) {
+            goto err;
+        }
+        iov_to_buf(res->iov, res->iov_cnt, tb.offset,
+                   res->blob + tb.offset,
+                   tb.linelength * tb.linecount);
+    }
+    return;
+
+err:
+    cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+    return;
+}
+
 static void virtio_gpu_resource_flush(VirtIOGPU *g,
                                       struct virtio_gpu_ctrl_command *cmd)
 {
@@ -1036,6 +1090,13 @@ static void virtio_gpu_simple_process_cmd(VirtIOGPU *g,
         break;
     case VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D:
         virtio_gpu_transfer_to_host_2d(g, cmd);
+        break;
+    case VIRTIO_GPU_CMD_TRANSFER_TO_HOST_BLOB:
+        if (!virtio_gpu_blob_enabled(g->parent_obj.conf)) {
+            cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+            break;
+        }
+        virtio_gpu_transfer_to_host_blob(g, cmd);
         break;
     case VIRTIO_GPU_CMD_SET_SCANOUT:
         virtio_gpu_set_scanout(g, cmd);
