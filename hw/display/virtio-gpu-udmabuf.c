@@ -153,6 +153,8 @@ void virtio_gpu_fini_udmabuf(struct virtio_gpu_simple_resource *res)
 {
     if (res->remapped) {
         fprintf(stderr, "%s: id %d, destroy dmabuf\n", __func__, res->resource_id);
+        qemu_pixman_image_unref(res->image);
+        res->image = NULL;
         virtio_gpu_destroy_udmabuf(res);
     }
 }
