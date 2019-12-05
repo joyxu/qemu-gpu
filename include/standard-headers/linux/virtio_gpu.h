@@ -61,6 +61,7 @@
  * VIRTIO_GPU_CMD_RESOURCE_CREATE_BLOB
  * VIRTIO_GPU_CMD_SET_SCANOUT_BLOB
  * VIRTIO_GPU_CMD_TRANSFER_TO_HOST_BLOB
+ * VIRTIO_GPU_CMD_SCANOUT_FLUSH
  *
  * FIXME: also need these?
  *   VIRTIO_GPU_CMD_TRANSFER_FROM_HOST_BLOB
@@ -110,6 +111,7 @@ enum virtio_gpu_ctrl_type {
 	VIRTIO_GPU_CMD_SET_SCANOUT_BLOB,
 	VIRTIO_GPU_CMD_TRANSFER_TO_HOST_BLOB,
 	VIRTIO_GPU_CMD_TRANSFER_FROM_HOST_BLOB, /* FIXME: need this ? */
+	VIRTIO_GPU_CMD_SCANOUT_FLUSH,
 	VIRTIO_GPU_CMD_RESOURCE_MAP_BLOB,
 	VIRTIO_GPU_CMD_RESOURCE_UNMAP_BLOB,
 	VIRTIO_GPU_CMD_METADATA_QUERY,
@@ -145,6 +147,7 @@ enum virtio_gpu_ctrl_type {
 	VIRTIO_GPU_RESP_ERR_INVALID_CONTEXT_ID,
 	VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER,
 	VIRTIO_GPU_RESP_ERR_NO_BACKING_STORAGE,
+	VIRTIO_GPU_RESP_ERR_RESOURCE_BUSY,
 };
 
 #define VIRTIO_GPU_FLAG_FENCE (1 << 0)
@@ -216,6 +219,13 @@ struct virtio_gpu_resource_create_blob {
 #define VIRTIO_GPU_MEMORY_CACHE_WC        0x0030
 	uint32_t memory_flags;
 	uint64_t size;
+
+	/* opengl (F_VIRGL) */
+	uint32_t target;
+
+	/* vulkan (no feature bit yet) */
+	uint32_t vk_size;
+	/* vulkan structed type args follow */
 };
 
 /* VIRTIO_GPU_CMD_RESOURCE_MAP_BLOB */
@@ -261,6 +271,14 @@ struct virtio_gpu_set_scanout_blob {
 	uint32_t height;
 	uint32_t stride;
 	uint64_t offset;
+};
+
+/* VIRTIO_GPU_CMD_SCANOUT_FLUSH */
+struct virtio_gpu_scanout_flush {
+	struct virtio_gpu_ctrl_hdr hdr;
+	struct virtio_gpu_rect r;
+	uint32_t scanout_id;
+	uint32_t padding;
 };
 
 /* VIRTIO_GPU_CMD_RESOURCE_FLUSH */
