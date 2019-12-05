@@ -644,14 +644,8 @@ static void virtio_gpu_resource_flush(VirtIOGPU *g,
         return;
     }
 
-    /* hack alert: unconditional fullscreen update for blob resources */
     if (res->blob_size) {
-        for (i = 0; i < g->parent_obj.conf.max_outputs; i++) {
-            if (!(res->scanout_bitmask & (1 << i))) {
-                continue;
-            }
-            dpy_gfx_update_full(g->parent_obj.scanout[i].con);
-        }
+        cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID;
         return;
     }
 
@@ -698,6 +692,37 @@ static void virtio_gpu_resource_flush(VirtIOGPU *g,
         pixman_region_fini(&finalregion);
     }
     pixman_region_fini(&flush_region);
+}
+
+static void virtio_gpu_scanout_flush(VirtIOGPU *g,
+                                     struct virtio_gpu_ctrl_command *cmd)
+{
+    struct virtio_gpu_scanout *scanout;
+    struct virtio_gpu_scanout_flush sf;
+
+    VIRTIO_GPU_FILL_CMD(sf);
+    virtio_gpu_bswap_32(&sf, sizeof(sf));
+    trace_virtio_gpu_cmd_scanout_flush(sf.scanout_id,
+                                       sf.r.width, sf.r.height, sf.r.x, sf.r.y);
+
+    if (sf.scanout_id >= g->parent_obj.conf.max_outputs) {
+        cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+        return;
+    }
+    scanout = &g->parent_obj.scanout[sf.scanout_id];
+
+    if (sf.r.x > scanout->width ||
+        sf.r.y > scanout->height ||
+        sf.r.width > scanout->width ||
+        sf.r.height > scanout->height ||
+        sf.r.x + sf.r.width > scanout->width ||
+        sf.r.y + sf.r.height > scanout->height) {
+        cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+        return;
+    }
+
+    dpy_gfx_update(g->parent_obj.scanout[sf.scanout_id].con,
+                   sf.r.x, sf.r.y, sf.r.width, sf.r.height);
 }
 
 static void virtio_unref_resource(pixman_image_t *image, void *data)
@@ -1087,6 +1112,13 @@ static void virtio_gpu_simple_process_cmd(VirtIOGPU *g,
         break;
     case VIRTIO_GPU_CMD_RESOURCE_FLUSH:
         virtio_gpu_resource_flush(g, cmd);
+        break;
+    case VIRTIO_GPU_CMD_SCANOUT_FLUSH:
+        if (!virtio_gpu_blob_enabled(g->parent_obj.conf)) {
+            cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+            break;
+        }
+        virtio_gpu_scanout_flush(g, cmd);
         break;
     case VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D:
         virtio_gpu_transfer_to_host_2d(g, cmd);
