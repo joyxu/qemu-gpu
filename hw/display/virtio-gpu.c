@@ -1296,11 +1296,6 @@ void virtio_gpu_device_realize(DeviceState *qdev, Error **errp)
             error_setg(errp, "cannot enable blob resources without udmabuf");
             return;
         }
-
-        if (virtio_gpu_virgl_enabled(g->parent_obj.conf)) {
-            error_setg(errp, "blobs and virgl are not compatible (yet)");
-            return;
-        }
     }
 
     if (!virtio_gpu_base_device_realize(qdev,
