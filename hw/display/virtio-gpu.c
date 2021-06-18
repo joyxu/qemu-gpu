@@ -33,8 +33,6 @@
 
 #define VIRTIO_GPU_VM_VERSION 1
 
-static struct virtio_gpu_simple_resource*
-virtio_gpu_find_resource(VirtIOGPU *g, uint32_t resource_id);
 static struct virtio_gpu_simple_resource *
 virtio_gpu_find_check_resource(VirtIOGPU *g, uint32_t resource_id,
                                bool require_backing,
@@ -115,7 +113,7 @@ static void update_cursor(VirtIOGPU *g, struct virtio_gpu_update_cursor *cursor)
                   cursor->resource_id ? 1 : 0);
 }
 
-static struct virtio_gpu_simple_resource *
+struct virtio_gpu_simple_resource *
 virtio_gpu_find_resource(VirtIOGPU *g, uint32_t resource_id)
 {
     struct virtio_gpu_simple_resource *res;
@@ -322,8 +320,8 @@ static void virtio_gpu_resource_create_2d(VirtIOGPU *g,
     g->hostmem += res->hostmem;
 }
 
-static void virtio_gpu_resource_create_blob(VirtIOGPU *g,
-                                            struct virtio_gpu_ctrl_command *cmd)
+void virtio_gpu_resource_create_blob(VirtIOGPU *g,
+                                     struct virtio_gpu_ctrl_command *cmd)
 {
     struct virtio_gpu_simple_resource *res;
     struct virtio_gpu_resource_create_blob cblob;
@@ -354,8 +352,8 @@ static void virtio_gpu_resource_create_blob(VirtIOGPU *g,
 
     if (cblob.blob_mem != VIRTIO_GPU_BLOB_MEM_GUEST &&
         cblob.blob_flags != VIRTIO_GPU_BLOB_FLAG_USE_SHAREABLE) {
-        qemu_log_mask(LOG_GUEST_ERROR, "%s: invalid memory type\n",
-                      __func__);
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: invalid memory type (mem %d, flags %d)\n",
+                      __func__, cblob.blob_mem, cblob.blob_flags);
         cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
         g_free(res);
         return;
