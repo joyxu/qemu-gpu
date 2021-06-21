@@ -116,11 +116,10 @@ VkDevice vk_init(void)
         VK_CHECK(vkCreateDebugReportCallbackEXT(instance, &debug_report_create_info, NULL, &debug_report_callback));
     }
 
-
     // Create device
     uint32_t device_count = 0;
     VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, NULL));
-    VkPhysicalDevice* physical_devices = g_new(VkPhysicalDevice, device_count);
+    VkPhysicalDevice *physical_devices = g_new(VkPhysicalDevice, device_count);
 
     VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, physical_devices));
 
@@ -132,8 +131,31 @@ VkDevice vk_init(void)
     vkGetPhysicalDeviceProperties(physical_device, &device_properties);
     g_print("Bringing up Vulkan on %s\n", device_properties.deviceName);
 
+    // Request a single graphics queue
+    uint32_t queue_family_index = 0;
+    const float default_queue_priority = 0.0f;
+    VkDeviceQueueCreateInfo queue_create_info = {};
+    uint32_t queue_family_count;
+    vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, NULL);
+    VkQueueFamilyProperties* queue_family_properties = g_new(VkQueueFamilyProperties, queue_family_count);
+    vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_family_properties);
+    for (uint32_t i = 0; i < queue_family_count; i++)
+    {
+        if (queue_family_properties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
+        {
+            queue_family_index = i;
+            queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+            queue_create_info.queueFamilyIndex = i;
+            queue_create_info.queueCount = 1;
+            queue_create_info.pQueuePriorities = &default_queue_priority;
+            break;
+        }
+    }
+
     VkDeviceCreateInfo device_create_info = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .queueCreateInfoCount = 1,
+        .pQueueCreateInfos = &queue_create_info,
     };
 
     VK_CHECK(vkCreateDevice(physical_device, &device_create_info, NULL, &device));

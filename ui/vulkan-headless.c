@@ -4,10 +4,9 @@
 #include "sysemu/sysemu.h"
 #include "ui/console.h"
 #include "ui/vulkan-helpers.h"
-
+#include "ui/vulkan-shader.h"
 #if 0
 #include "ui/egl-context.h"
-#include "ui/shader.h"
 #endif
 
 typedef struct vulkan_dpy {
@@ -208,7 +207,7 @@ static void vk_headless_init(DisplayState *ds, DisplayOptions *opts)
         vdpy = g_new0(vulkan_dpy, 1);
         vdpy->dcl.con = con;
         vdpy->dcl.ops = &vulkan_ops;
-        //vdpy->gls = qemu_vulkan_init_shader();
+        vdpy->gls = qemu_vk_init_shader(device);
         register_displaychangelistener(&vdpy->dcl);
     }
 }
