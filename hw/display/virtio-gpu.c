@@ -359,20 +359,25 @@ void virtio_gpu_resource_create_blob(VirtIOGPU *g,
         return;
     }
 
-    if (res->iov) {
-        cmd->error = VIRTIO_GPU_RESP_ERR_UNSPEC;
-        return;
+    if (cblob.blob_mem != VIRTIO_GPU_BLOB_MEM_HOST3D) {
+        if (res->iov) {
+            cmd->error = VIRTIO_GPU_RESP_ERR_UNSPEC;
+            return;
+        }
+
+        ret = virtio_gpu_create_mapping_iov(g, cblob.nr_entries, sizeof(cblob),
+                                            cmd, &res->addrs, &res->iov,
+                                            &res->iov_cnt);
+        if (ret != 0) {
+            cmd->error = VIRTIO_GPU_RESP_ERR_UNSPEC;
+            return;
+        }
     }
 
-    ret = virtio_gpu_create_mapping_iov(g, cblob.nr_entries, sizeof(cblob),
-                                        cmd, &res->addrs, &res->iov,
-                                        &res->iov_cnt);
-    if (ret != 0) {
-        cmd->error = VIRTIO_GPU_RESP_ERR_UNSPEC;
-        return;
+    if (cblob.blob_mem == VIRTIO_GPU_BLOB_MEM_GUEST) {
+        virtio_gpu_init_udmabuf(res);
     }
 
-    virtio_gpu_init_udmabuf(res);
     QTAILQ_INSERT_HEAD(&g->reslist, res, next);
 }
 
