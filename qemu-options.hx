@@ -1798,6 +1798,9 @@ DEF("display", HAS_ARG, QEMU_OPTION_display,
 #if defined(CONFIG_OPENGL)
     "-display egl-headless[,rendernode=<file>]\n"
 #endif
+#if defined(CONFIG_VULKAN)
+    "display vulkan-headless\n"
+#endif
     "-display none\n"
     "                select display backend type\n"
     "                The default display is equivalent to\n                "

@@ -38,6 +38,7 @@ extern int graphic_width;
 extern int graphic_height;
 extern int graphic_depth;
 extern int display_opengl;
+extern int display_vulkan;
 extern const char *keyboard_layout;
 extern int win2k_install_hack;
 extern int alt_grab;

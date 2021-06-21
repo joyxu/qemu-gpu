@@ -192,6 +192,10 @@ static const struct {
     { "ui-sdl",          "ui-opengl"    },
     { "ui-spice-core",   "ui-opengl"    },
 #endif
+
+#ifdef CONFIG_VULKAN
+    { "ui-vulkan-headless", "ui-vulkan" },
+#endif
 };
 #endif
 

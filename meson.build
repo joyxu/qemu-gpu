@@ -828,6 +828,11 @@ if 'CONFIG_OPENGL' in config_host
   opengl = declare_dependency(compile_args: config_host['OPENGL_CFLAGS'].split(),
                               link_args: config_host['OPENGL_LIBS'].split())
 endif
+vulkan = not_found
+if 'CONFIG_VULKAN' in config_host
+  vulkan = declare_dependency(compile_args: config_host['VULKAN_CFLAGS'].split(),
+                              link_args: config_host['VULKAN_LIBS'].split())
+endif
 
 gtk = not_found
 gtkx11 = not_found
@@ -2726,6 +2731,7 @@ summary_info += {'U2F support':       u2f.found()}
 summary_info += {'libusb':            config_host.has_key('CONFIG_USB_LIBUSB')}
 summary_info += {'usb net redir':     config_host.has_key('CONFIG_USB_REDIR')}
 summary_info += {'OpenGL support':    config_host.has_key('CONFIG_OPENGL')}
+summary_info += {'Vulkan support':    config_host.has_key('CONFIG_VULKAN')}
 summary_info += {'GBM':               config_host.has_key('CONFIG_GBM')}
 summary_info += {'libiscsi support':  libiscsi.found()}
 summary_info += {'libnfs support':    libnfs.found()}

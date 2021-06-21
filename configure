@@ -377,6 +377,7 @@ u2f="auto"
 libusb="$default_feature"
 usb_redir="$default_feature"
 opengl="$default_feature"
+vulkan="auto"
 cpuid_h="no"
 avx2_opt="$default_feature"
 capstone="auto"
@@ -1272,6 +1273,10 @@ for opt do
   ;;
   --enable-opengl) opengl="yes"
   ;;
+  --disable-vulkan) vulkan="no"
+  ;;
+  --enable-vulkan) vulkan="yes"
+  ;;
   --disable-rbd) rbd="disabled"
   ;;
   --enable-rbd) rbd="enabled"
@@ -1916,6 +1921,7 @@ disabled with --disable-FEATURE, default is enabled if available
   avx512f         AVX512F optimization support
   replication     replication support
   opengl          opengl support
+  vulkan          vulkan support
   virglrenderer   virgl rendering support
   xfsctl          xfsctl support
   qom-cast-debug  cast debugging support
@@ -3639,6 +3645,21 @@ EOF
     opengl_cflags=""
     opengl_libs=""
     opengl=no
+  fi
+fi
+
+if test "$vulkan" != "no" ; then
+  if $pkg_config vulkan; then
+    vulkan_cflags="$($pkg_config --cflags vulkan)"
+    vulkan_libs="$($pkg_config --libs vulkan)"
+    vulkan=yes
+  else
+    if test "$vulkan" == "yes" ; then
+      feature_not_found "vulkan" "Please install vulkan?"
+    fi
+    vulkan_cflags=""
+    vulkan_libs=""
+    vulkan=no
   fi
 fi
 
@@ -5848,6 +5869,12 @@ if test "$opengl" = "yes" ; then
   echo "CONFIG_OPENGL=y" >> $config_host_mak
   echo "OPENGL_CFLAGS=$opengl_cflags" >> $config_host_mak
   echo "OPENGL_LIBS=$opengl_libs" >> $config_host_mak
+fi
+
+if test "$vulkan" = "yes" ; then
+  echo "CONFIG_VULKAN=y" >> $config_host_mak
+  echo "VULKAN_CFLAGS=$vulkan_cflags" >> $config_host_mak
+  echo "VULKAN_LIBS=$vulkan_libs" >> $config_host_mak
 fi
 
 if test "$gbm" = "yes" ; then

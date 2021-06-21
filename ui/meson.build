@@ -62,6 +62,13 @@ if config_host.has_key('CONFIG_OPENGL') and gbm.found()
   ui_modules += {'egl-headless' : egl_headless_ss}
 endif
 
+if config_host.has_key('CONFIG_VULKAN')
+  vulkan_headless_ss = ss.source_set()
+  vulkan_headless_ss.add(when: [vulkan, 'CONFIG_VULKAN'],
+                         if_true: files('vulkan-helpers.c', 'vulkan-headless.c'))
+  ui_modules += {'vulkan-headless' : vulkan_headless_ss}
+endif
+
 if gtk.found()
   softmmu_ss.add(when: 'CONFIG_WIN32', if_true: files('win32-kbd-hook.c'))
 

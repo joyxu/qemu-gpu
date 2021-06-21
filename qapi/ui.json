@@ -1057,7 +1057,16 @@
 { 'struct'  : 'DisplayEGLHeadless',
   'data'    : { '*rendernode' : 'str' } }
 
- ##
+##
+# @DisplayVulkanHeadless:
+#
+# Vulkan headless display options.
+#
+##
+{ 'struct'  : 'DisplayVulkanHeadless',
+  'data'    : {} }
+
+  ##
  # @DisplayGLMode:
  #
  # Display OpenGL mode.
@@ -1128,7 +1137,7 @@
 { 'enum'    : 'DisplayType',
   'data'    : [ 'default', 'none', 'gtk', 'sdl',
                 'egl-headless', 'curses', 'cocoa',
-                'spice-app'] }
+                'spice-app', 'vulkan-headless'] }
 
 ##
 # @DisplayOptions:
@@ -1154,7 +1163,8 @@
   'discriminator' : 'type',
   'data'    : { 'gtk'            : 'DisplayGTK',
                 'curses'         : 'DisplayCurses',
-                'egl-headless'   : 'DisplayEGLHeadless'} }
+                'egl-headless'   : 'DisplayEGLHeadless',
+                'vulkan-headless': 'DisplayVulkanHeadless'} }
 
 ##
 # @query-display-options:
