@@ -12,6 +12,6 @@ typedef struct vulkan_fb {
     bool delete_texture;
 } vulkan_fb;
 
-void vulkan_init(void);
+VkDevice vk_init(void);
 
 #endif // VULKAN_HELPERS_H

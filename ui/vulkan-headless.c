@@ -177,17 +177,19 @@ static const DisplayChangeListenerOps vulkan_ops = {
 };
 
 
-static void early_vulkan_headless_init(DisplayOptions *opts)
+static void early_vk_headless_init(DisplayOptions *opts)
 {
     display_vulkan = 1;
 }
 
-static void vulkan_headless_init(DisplayState *ds, DisplayOptions *opts)
+static void vk_headless_init(DisplayState *ds, DisplayOptions *opts)
 {
-    vulkan_init();
+    VkDevice device;
     QemuConsole *con;
     vulkan_dpy *vdpy;
     int idx;
+
+    device = vk_init();
     /*
     DisplayGLMode mode = opts->has_gl ? opts->gl : DISPLAYGL_MODE_ON;
 
@@ -213,8 +215,8 @@ static void vulkan_headless_init(DisplayState *ds, DisplayOptions *opts)
 
 static QemuDisplay qemu_display_vulkan = {
     .type       = DISPLAY_TYPE_VULKAN_HEADLESS,
-    .early_init = early_vulkan_headless_init,
-    .init       = vulkan_headless_init,
+    .early_init = early_vk_headless_init,
+    .init       = vk_headless_init,
 };
 
 static void register_vulkan(void)
