@@ -21,7 +21,118 @@
 
 #define VK_CHECK(res) g_assert(res == VK_SUCCESS)
 
+// TODO where do we destroy these?
 VkInstance instance;
+VkDevice device;
+
+/* -- */
+
+static void vk_texture_destroy(VkDevice device, vulkan_texture *texture)
+{
+    if (texture->delete_image)
+    {
+        if (texture->image != VK_NULL_HANDLE)
+        {
+            vkDestroyImage(device, texture->image, NULL);
+            texture->image = VK_NULL_HANDLE;
+        }
+
+        texture->delete_image = false;
+    }
+
+    if (texture->view != VK_NULL_HANDLE)
+    {
+        vkDestroyImageView(device, texture->view, NULL);
+        texture->view = VK_NULL_HANDLE;
+    }
+
+    texture->width = 0;
+    texture->height = 0;
+}
+
+void vk_fb_destroy(VkDevice device, vulkan_fb *fb)
+{
+    if (fb->framebuffer == VK_NULL_HANDLE)
+    {
+        return;
+    }
+
+    vk_texture_destroy(device, &fb->texture);
+    vkDestroyFramebuffer(device, fb->framebuffer, NULL);
+    fb->framebuffer = VK_NULL_HANDLE;
+}
+
+void vk_fb_setup_for_tex(VkDevice device, vulkan_fb *fb, vulkan_texture texture)
+{
+    // Destroy previous texture and then set the new one
+    vk_texture_destroy(device, &fb->texture);
+    fb->texture = texture;
+
+    if (fb->framebuffer == VK_NULL_HANDLE)
+    {
+        VkFramebufferCreateInfo framebuffer_create_info = {
+            .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+            .renderPass = VK_NULL_HANDLE,
+            .attachmentCount = 1,
+            .pAttachments = &fb->texture.view,
+            .width = fb->texture.width,
+            .height = fb->texture.height,
+            .layers = 1,
+        };
+
+        VK_CHECK(vkCreateFramebuffer(device, &framebuffer_create_info, NULL, &fb->framebuffer));
+    }
+}
+
+void vk_fb_setup_new_tex(VkDevice device, vulkan_fb *fb, int width, int height)
+{
+    vulkan_texture texture = {
+        .width = width,
+        .height = height,
+        .delete_image = true,
+        .image = VK_NULL_HANDLE,
+        .view = VK_NULL_HANDLE,
+    };
+
+    // TODO find the right format
+    VkFormat format = VK_FORMAT_R8G8B8A8_SRGB;
+
+    VkImageCreateInfo image_create_info = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = format,
+        .extent = {
+            .width = width,
+            .height = height,
+            .depth = 1,
+        },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, // TODO figure out usage of this fb
+    };
+
+    VK_CHECK(vkCreateImage(device, &image_create_info, NULL, &texture.image));
+
+    // TODO: Bind memory
+
+    VkImageViewCreateInfo image_view_create_info = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = texture.image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = format,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .levelCount = 1,
+            .layerCount = 1,
+        }};
+
+    VK_CHECK(vkCreateImageView(device, &image_view_create_info, NULL, &texture.view));
+
+    vk_fb_setup_for_tex(device, fb, texture);
+}
+
+/* -- */
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debug_message_callback(
     VkDebugReportFlagsEXT flags,
@@ -33,14 +144,12 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_message_callback(
     const char *message,
     void *user_data)
 {
-    g_print("[Vulkan validation]: %s - %s\n", layer_prefix, message);
+    g_printerr("[Vulkan validation]: %s - %s\n", layer_prefix, message);
     return VK_FALSE;
 }
 
 VkDevice vk_init(void)
 {
-    VkDevice device = VK_NULL_HANDLE;
-
     VkApplicationInfo app_info = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
         .pApplicationName = "Qemu headless",
@@ -137,7 +246,7 @@ VkDevice vk_init(void)
     VkDeviceQueueCreateInfo queue_create_info = {};
     uint32_t queue_family_count;
     vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, NULL);
-    VkQueueFamilyProperties* queue_family_properties = g_new(VkQueueFamilyProperties, queue_family_count);
+    VkQueueFamilyProperties *queue_family_properties = g_new(VkQueueFamilyProperties, queue_family_count);
     vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_family_properties);
     for (uint32_t i = 0; i < queue_family_count; i++)
     {

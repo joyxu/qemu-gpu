@@ -40,44 +40,54 @@
 
 struct QemuVkShader
 {
-    VkPipeline texture_blit_prog;
-    VkPipeline texture_blit_flip_prog;
-    VkBuffer texture_blit_vao;
+    VkPipeline texture_blit_pipeline;
+    VkPipeline texture_blit_flip_pipeline;
+    VkBuffer texture_blit_vertex_buffer;
 };
 
-#if 0
 /* ---------------------------------------------------------------------- */
-
-static GLuint qemu_vk_init_texture_blit(GLint texture_blit_prog)
+struct QemuVkVertex
 {
-    static const GLfloat in_position[] = {
-        -1, -1,
-        1,  -1,
-        -1,  1,
-        1,   1,
+    float x;
+    float y;
+};
+
+// 4 vec2
+static const struct QemuVkVertex in_position[] = {
+    {
+        .x = -1.0,
+        .y = -1.0,
+    },
+    {
+        .x = 1.0,
+        .y = -1.0,
+    },
+    {
+        .x = -1.0,
+        .y = 1.0,
+    },
+    {
+        .x = 1.0,
+        .y = 1.0,
+    },
+};
+
+static VkBuffer
+qemu_vk_init_texture_blit_vertex_buffer(VkDevice device)
+{
+
+    VkBufferCreateInfo buffer_create_info = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = sizeof(in_position),
+        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
     };
-    GLint l_position;
-    GLuint vao, buffer;
 
-    glGenVertexArrays(1, &vao);
-    glBindVertexArray(vao);
-
-    /* this is the VBO that holds the vertex data */
-    glGenBuffers(1, &buffer);
-    glBindBuffer(GL_ARRAY_BUFFER, buffer);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(in_position), in_position,
-                 GL_STATIC_DRAW);
-
-    l_position = glGetAttribLocation(texture_blit_prog, "in_position");
-    glVertexAttribPointer(l_position, 2, GL_FLOAT, GL_FALSE, 0, 0);
-    glEnableVertexAttribArray(l_position);
-
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindVertexArray(0);
-
-    return vao;
+    VkBuffer buffer;
+    VK_CHECK(vkCreateBuffer(device, &buffer_create_info, NULL, &buffer));
+    return buffer;
 }
 
+#if 0
 void qemu_vk_run_texture_blit(QemuVkShader *gls, bool flip)
 {
     glUseProgram(flip
@@ -86,76 +96,214 @@ void qemu_vk_run_texture_blit(QemuVkShader *gls, bool flip)
     glBindVertexArray(gls->texture_blit_vao);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
+#endif
 
 /* ---------------------------------------------------------------------- */
-#endif
 static VkShaderModule qemu_vk_create_compile_shader(VkDevice device, const char *src, size_t code_size)
 {
-    VkShaderModule shader;
-
     VkShaderModuleCreateInfo shader_module_create_info = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .codeSize = code_size,
         .pCode = (const uint32_t *)src,
     };
 
+    VkShaderModule shader;
     VK_CHECK(vkCreateShaderModule(device, &shader_module_create_info, NULL, &shader));
-
-    /*
-    GLint status, length;
-    char *errmsg;
-
-    shader = glCreateShader(type);
-    glShaderSource(shader, 1, &src, 0);
-    glCompileShader(shader);
-
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
-    if (!status) {
-        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &length);
-        errmsg = g_malloc(length);
-        glGetShaderInfoLog(shader, length, &length, errmsg);
-        fprintf(stderr, "%s: compile %s error\n%s\n", __func__,
-                (type == GL_VERTEX_SHADER) ? "vertex" : "fragment",
-                errmsg);
-        g_free(errmsg);
-        return 0;
-    }
-    */
     return shader;
 }
 
-#if 0
-
-static GLuint qemu_vk_create_link_program(GLuint vert, GLuint frag)
+// layout (binding = 0) uniform sampler2D image;
+static VkDescriptorSetLayout qemu_vk_create_set_layout(VkDevice device)
 {
-    GLuint program;
-    GLint status, length;
-    char *errmsg;
+    VkDescriptorSetLayoutBinding layout_binding = {
+        .binding = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+    };
 
-    program = glCreateProgram();
-    glAttachShader(program, vert);
-    glAttachShader(program, frag);
-    glLinkProgram(program);
+    VkDescriptorSetLayoutCreateInfo layout_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindings = &layout_binding,
+    };
 
-    glGetProgramiv(program, GL_LINK_STATUS, &status);
-    if (!status) {
-        glGetProgramiv(program, GL_INFO_LOG_LENGTH, &length);
-        errmsg = g_malloc(length);
-        glGetProgramInfoLog(program, length, &length, errmsg);
-        fprintf(stderr, "%s: link program: %s\n", __func__, errmsg);
-        g_free(errmsg);
-        return 0;
-    }
-    return program;
+    VkDescriptorSetLayout layout;
+    VK_CHECK(vkCreateDescriptorSetLayout(device, &layout_info, NULL, &layout));
+    return layout;
 }
-#endif
 
-static VkPipeline qemu_vk_create_compile_link_program(VkDevice device,
-                                                      const char *vert_src, size_t vert_size,
-                                                      const char *frag_src, size_t frag_size)
+static VkPipelineLayout qemu_vk_create_pipeline_layout(VkDevice device)
+{
+    VkDescriptorSetLayout set_layout = qemu_vk_create_set_layout(device);
+
+    VkPipelineLayoutCreateInfo pipeline_layout_create_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &set_layout,
+    };
+
+    VkPipelineLayout pipeline_layout;
+    VK_CHECK(vkCreatePipelineLayout(device, &pipeline_layout_create_info, NULL, &pipeline_layout));
+
+    // TODO destroy set_layout?
+
+    return pipeline_layout;
+}
+
+static VkRenderPass qemu_vk_create_render_pass(VkDevice device)
+{
+    VkAttachmentDescription color_attachment = {
+        .format = VK_FORMAT_R8G8B8A8_SRGB, // TODO swapchain format
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+    };
+
+    VkAttachmentReference color_attachment_ref = {
+        .attachment = 0,
+        .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    };
+
+    VkSubpassDescription subpass = {
+        .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &color_attachment_ref,
+    };
+
+    VkRenderPassCreateInfo render_pass_create_info = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &color_attachment,
+        .subpassCount = 1,
+        .pSubpasses = &subpass,
+    };
+
+    VkRenderPass render_pass;
+    VK_CHECK(vkCreateRenderPass(device, &render_pass_create_info, NULL, &render_pass));
+    return render_pass;
+}
+
+static VkPipeline qemu_vk_create_graphics_pipeline(VkDevice device, VkShaderModule vert, VkShaderModule frag, VkPipelineLayout pipeline_layout, VkRenderPass render_pass)
+{
+    VkPipelineShaderStageCreateInfo shader_stage_info[] = {
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT,
+            .module = vert,
+            .pName = "main",
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .module = frag,
+            .pName = "main",
+        },
+    };
+
+    VkVertexInputBindingDescription vertex_input_binding_description = {
+        .binding = 0,
+        .stride = sizeof(struct QemuVkVertex),
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+    };
+
+    VkVertexInputAttributeDescription vertex_input_attribute_description = {
+        .binding = 0,
+        .location = 0,
+        .format = VK_FORMAT_R32G32_SFLOAT,
+    };
+
+    VkPipelineVertexInputStateCreateInfo vertex_input_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        .vertexBindingDescriptionCount = 1,
+        .pVertexBindingDescriptions = &vertex_input_binding_description,
+        .vertexAttributeDescriptionCount = 1,
+        .pVertexAttributeDescriptions = &vertex_input_attribute_description,
+    };
+
+    VkPipelineInputAssemblyStateCreateInfo input_assembly = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+    };
+
+    // TODO use parameters instead of magic numbers
+    VkExtent2D extent = {
+        .width = 1024,
+        .height = 768,
+    };
+
+    VkViewport viewport = {
+        .width = extent.width,
+        .height = extent.height,
+        .maxDepth = 1.0f,
+    };
+
+    VkRect2D scissor = {
+        .extent = extent,
+    };
+
+    VkPipelineViewportStateCreateInfo viewport_state = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .pViewports = &viewport,
+        .scissorCount = 1,
+        .pScissors = &scissor,
+    };
+
+    VkPipelineRasterizationStateCreateInfo rasterizer = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .lineWidth = 1.0,
+        .cullMode = VK_CULL_MODE_BACK_BIT,
+        .frontFace = VK_FRONT_FACE_CLOCKWISE,
+    };
+
+    VkPipelineMultisampleStateCreateInfo multisampling = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+    };
+
+    VkPipelineColorBlendAttachmentState color_blend_attachment = {
+        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+    };
+
+    VkPipelineColorBlendStateCreateInfo color_blending = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .logicOp = VK_LOGIC_OP_COPY,
+        .attachmentCount = 1,
+        .pAttachments = &color_blend_attachment,
+    };
+
+    VkGraphicsPipelineCreateInfo pipeline_create_info = {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .stageCount = ARRAY_SIZE(shader_stage_info),
+        .pStages = shader_stage_info,
+        .pVertexInputState = &vertex_input_info,
+        .pInputAssemblyState = &input_assembly,
+        .pViewportState = &viewport_state,
+        .pRasterizationState = &rasterizer,
+        .pMultisampleState = &multisampling,
+        .pColorBlendState = &color_blending,
+        .layout = pipeline_layout,
+        .renderPass = render_pass,
+    };
+
+    VkPipeline graphics_pipeline;
+    VK_CHECK(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipeline_create_info, NULL, &graphics_pipeline));
+    return graphics_pipeline;
+}
+
+static VkPipeline qemu_vk_create_pipeline_layout_from_sources(VkDevice device,
+                                                              const char *vert_src, size_t vert_size,
+                                                              const char *frag_src, size_t frag_size)
 {
     VkShaderModule vert_shader, frag_shader;
-    VkPipeline program;
+    VkPipelineLayout pipeline_layout;
+    VkRenderPass render_pass;
+    VkPipeline graphics_pipeline;
 
     vert_shader = qemu_vk_create_compile_shader(device, vert_src, vert_size);
     frag_shader = qemu_vk_create_compile_shader(device, frag_src, frag_size);
@@ -164,12 +312,19 @@ static VkPipeline qemu_vk_create_compile_link_program(VkDevice device,
         return VK_NULL_HANDLE;
     }
 
-    // TODO
-    //program = qemu_vk_create_link_program(vert_shader, frag_shader);
+    pipeline_layout = qemu_vk_create_pipeline_layout(device);
+
+    render_pass = qemu_vk_create_render_pass(device);
+
+    graphics_pipeline = qemu_vk_create_graphics_pipeline(device, vert_shader, frag_shader, pipeline_layout, render_pass);
+
     vkDestroyShaderModule(device, vert_shader, NULL);
     vkDestroyShaderModule(device, frag_shader, NULL);
 
-    return program;
+    // TODO destroy pipeline_layout?
+    // TODO store render_pass?
+
+    return graphics_pipeline;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -178,16 +333,18 @@ QemuVkShader *qemu_vk_init_shader(VkDevice device)
 {
     QemuVkShader *vks = g_new0(QemuVkShader, 1);
 
-    vks->texture_blit_prog = qemu_vk_create_compile_link_program(device,
-                                                                 texture_blit_vert_src, ARRAY_SIZE(texture_blit_vert_src),
-                                                                 texture_blit_frag_src, ARRAY_SIZE(texture_blit_frag_src));
-    vks->texture_blit_flip_prog = qemu_vk_create_compile_link_program(device,
-                                                                      texture_blit_flip_vert_src, ARRAY_SIZE(texture_blit_flip_vert_src),
-                                                                      texture_blit_frag_src, ARRAY_SIZE(texture_blit_frag_src));
-    g_assert(vks->texture_blit_prog != VK_NULL_HANDLE && vks->texture_blit_flip_prog != VK_NULL_HANDLE);
+    vks->texture_blit_pipeline =
+        qemu_vk_create_pipeline_layout_from_sources(device,
+                                                    texture_blit_vert_src, ARRAY_SIZE(texture_blit_vert_src),
+                                                    texture_blit_frag_src, ARRAY_SIZE(texture_blit_frag_src));
+    vks->texture_blit_flip_pipeline =
+        qemu_vk_create_pipeline_layout_from_sources(device,
+                                                    texture_blit_flip_vert_src, ARRAY_SIZE(texture_blit_flip_vert_src),
+                                                    texture_blit_frag_src, ARRAY_SIZE(texture_blit_frag_src));
+    g_assert(vks->texture_blit_pipeline != VK_NULL_HANDLE &&
+             vks->texture_blit_flip_pipeline != VK_NULL_HANDLE);
 
-    // TODO
-    // vks->texture_blit_vao = qemu_vk_init_texture_blit(vks->texture_blit_prog);
+    vks->texture_blit_vertex_buffer = qemu_vk_init_texture_blit_vertex_buffer(device);
 
     return vks;
 }
@@ -199,8 +356,9 @@ void qemu_vk_fini_shader(VkDevice device, QemuVkShader *vks)
         return;
     }
 
-    vkDestroyPipeline(device, vks->texture_blit_flip_prog, NULL);
-    vkDestroyPipeline(device, vks->texture_blit_prog, NULL);
+    vkDestroyPipeline(device, vks->texture_blit_flip_pipeline, NULL);
+    vkDestroyPipeline(device, vks->texture_blit_pipeline, NULL);
+    vkDestroyBuffer(device, vks->texture_blit_vertex_buffer, NULL);
 
     g_free(vks);
 }
