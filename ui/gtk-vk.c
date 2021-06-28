@@ -1,10 +1,10 @@
 /*
- * GTK UI
+ * Vulkan GTK UI
  *
- * Copyright IBM, Corp. 2012
+ * Copyright © Collabora Ltd.
  *
  * Authors:
- *  Anthony Liguori   <aliguori@us.ibm.com>
+ *  Antonio Caggiano <antonio.caggiano@collabora.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,12 +19,6 @@
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  *
- * Portions from gtk-vnc (originally licensed under the LGPL v2+):
- *
- * GTK VNC Widget
- *
- * Copyright (C) 2006  Anthony Liguori <anthony@codemonkey.ws>
- * Copyright (C) 2009-2010 Daniel P. Berrange <dan@berrange.com>
  */
 
 #define GETTEXT_PACKAGE "qemu"
@@ -113,7 +107,7 @@
 # define VTE_CHECK_VERSION(a, b, c) 0
 #endif
 
-#define HOTKEY_MODIFIERS        (GDK_CONTROL_MASK | GDK_ALT_MASK)
+#define HOTKEY_MODIFIERS        (GDK_CONTROL_MASK | GDK_MOD1_MASK)
 
 static const guint16 *keycode_map;
 static size_t keycode_maplen;
@@ -145,8 +139,8 @@ static VirtualConsole *gd_vc_find_by_menu(GtkDisplayState *s)
 
     for (i = 0; i < s->nb_vcs; i++) {
         vc = &s->vc[i];
-        if (gtk_check_button_get_active
-            (GTK_CHECK_BUTTON(vc->menu_item))) {
+        if (gtk_check_menu_item_get_active
+            (GTK_CHECK_MENU_ITEM(vc->menu_item))) {
             return vc;
         }
     }
@@ -178,19 +172,18 @@ static VirtualConsole *gd_vc_find_current(GtkDisplayState *s)
 
 static bool gd_is_grab_active(GtkDisplayState *s)
 {
-    return gtk_check_button_get_active(GTK_CHECK_BUTTON(s->grab_item));
+    return gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(s->grab_item));
 }
 
 static bool gd_grab_on_hover(GtkDisplayState *s)
 {
-    return gtk_check_button_get_active(GTK_CHECK_BUTTON(s->grab_on_hover_item));
+    return gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(s->grab_on_hover_item));
 }
 
 static void gd_update_cursor(VirtualConsole *vc)
 {
     GtkDisplayState *s = vc->s;
-    GdkSurface *surface;
-    GtkNative *native;
+    GdkWindow *window;
 
     if (vc->type != GD_VC_GFX ||
         !qemu_console_is_graphic(vc->gfx.dcl.con)) {
@@ -201,12 +194,11 @@ static void gd_update_cursor(VirtualConsole *vc)
         return;
     }
 
-    native = gtk_widget_get_native(GTK_WIDGET(vc->gfx.drawing_area));
-    surface = gtk_native_get_surface(native);
+    window = gtk_widget_get_window(GTK_WIDGET(vc->gfx.drawing_area));
     if (s->full_screen || qemu_input_is_absolute() || s->ptr_owner == vc) {
-        gdk_surface_set_cursor(surface, s->null_cursor);
+        gdk_window_set_cursor(window, s->null_cursor);
     } else {
-        gdk_surface_set_cursor(surface, NULL);
+        gdk_window_set_cursor(window, NULL);
     }
 }
 
@@ -226,13 +218,17 @@ static void gd_update_caption(GtkDisplayState *s)
     }
 
     if (s->ptr_owner != NULL &&
-        s->ptr_owner->surface == NULL) {
+        s->ptr_owner->window == NULL) {
         grab = _(" - Press Ctrl+Alt+G to release grab");
     }
 
     if (is_paused) {
         status = _(" [Paused]");
     }
+    s->external_pause_update = true;
+    gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(s->pause_item),
+                                   is_paused);
+    s->external_pause_update = false;
 
     title = g_strdup_printf("%s%s%s", prefix, status, grab);
     gtk_window_set_title(GTK_WINDOW(s->window), title);
@@ -257,7 +253,8 @@ static void gd_update_caption(GtkDisplayState *s)
 static void gd_update_geometry_hints(VirtualConsole *vc)
 {
     GtkDisplayState *s = vc->s;
-    int min_width, min_height;
+    GdkWindowHints mask = 0;
+    GdkGeometry geo = {};
     GtkWidget *geo_widget = NULL;
     GtkWindow *geo_window;
 
@@ -266,17 +263,16 @@ static void gd_update_geometry_hints(VirtualConsole *vc)
             return;
         }
         if (s->free_scale) {
-            min_width  = surface_width(vc->gfx.ds) * VC_SCALE_MIN;
-            min_height = surface_height(vc->gfx.ds) * VC_SCALE_MIN;
-            // TODO no hints?
-           // mask |= GDK_HINT_MIN_SIZE;
+            geo.min_width  = surface_width(vc->gfx.ds) * VC_SCALE_MIN;
+            geo.min_height = surface_height(vc->gfx.ds) * VC_SCALE_MIN;
+            mask |= GDK_HINT_MIN_SIZE;
         } else {
-            min_width  = surface_width(vc->gfx.ds) * vc->gfx.scale_x;
-            min_height = surface_height(vc->gfx.ds) * vc->gfx.scale_y;
-          //  mask |= GDK_HINT_MIN_SIZE;
+            geo.min_width  = surface_width(vc->gfx.ds) * vc->gfx.scale_x;
+            geo.min_height = surface_height(vc->gfx.ds) * vc->gfx.scale_y;
+            mask |= GDK_HINT_MIN_SIZE;
         }
         geo_widget = vc->gfx.drawing_area;
-        gtk_widget_set_size_request(geo_widget, min_width, min_height);
+        gtk_widget_set_size_request(geo_widget, geo.min_width, geo.min_height);
 
 #if defined(CONFIG_VTE)
     } else if (vc->type == GD_VC_VTE) {
@@ -318,7 +314,7 @@ static void gd_update_geometry_hints(VirtualConsole *vc)
     }
 
     geo_window = GTK_WINDOW(vc->window ? vc->window : s->window);
-    gtk_window_set_default_size(geo_window, min_width, min_height);
+    gtk_window_set_geometry_hints(geo_window, geo_widget, &geo, mask);
 }
 
 void gd_update_windowsize(VirtualConsole *vc)
@@ -328,20 +324,24 @@ void gd_update_windowsize(VirtualConsole *vc)
     gd_update_geometry_hints(vc);
 
     if (vc->type == GD_VC_GFX && !s->full_screen && !s->free_scale) {
-        gtk_window_set_default_size(GTK_WINDOW(vc->window ? vc->window : s->window),
+        gtk_window_resize(GTK_WINDOW(vc->window ? vc->window : s->window),
                           VC_WINDOW_X_MIN, VC_WINDOW_Y_MIN);
     }
 }
 
 static void gd_update_full_redraw(VirtualConsole *vc)
 {
+    GtkWidget *area = vc->gfx.drawing_area;
+    int ww, wh;
+    ww = gdk_window_get_width(gtk_widget_get_window(area));
+    wh = gdk_window_get_height(gtk_widget_get_window(area));
 #if defined(CONFIG_OPENGL)
     if (vc->gfx.gls && gtk_use_gl_area) {
         gtk_gl_area_queue_render(GTK_GL_AREA(vc->gfx.drawing_area));
         return;
     }
 #endif
-    gtk_widget_queue_draw(vc->gfx.drawing_area);
+    gtk_widget_queue_draw_area(area, 0, 0, ww, wh);
 }
 
 static void gtk_release_modifiers(GtkDisplayState *s)
@@ -358,7 +358,10 @@ static void gtk_release_modifiers(GtkDisplayState *s)
 static void gd_widget_reparent(GtkWidget *from, GtkWidget *to,
                                GtkWidget *widget)
 {
-    gtk_widget_set_parent(widget, to);
+    g_object_ref(G_OBJECT(widget));
+    gtk_container_remove(GTK_CONTAINER(from), widget);
+    gtk_container_add(GTK_CONTAINER(to), widget);
+    g_object_unref(G_OBJECT(widget));
 }
 
 static void *gd_win32_get_hwnd(VirtualConsole *vc)
@@ -377,12 +380,11 @@ static void gd_update(DisplayChangeListener *dcl,
                       int x, int y, int w, int h)
 {
     VirtualConsole *vc = container_of(dcl, VirtualConsole, gfx.dcl);
-    GtkNative *native;
-    GdkSurface *surface;
+    GdkWindow *win;
     int x1, x2, y1, y2;
     int mx, my;
     int fbw, fbh;
-    int sw, sh;
+    int ww, wh;
 
     trace_gd_update(vc->label, x, y, w, h);
 
@@ -396,7 +398,6 @@ static void gd_update(DisplayChangeListener *dcl,
                                x, y, 0, 0, x, y, w, h);
     }
 
-    /*
     x1 = floor(x * vc->gfx.scale_x);
     y1 = floor(y * vc->gfx.scale_y);
 
@@ -406,25 +407,23 @@ static void gd_update(DisplayChangeListener *dcl,
     fbw = surface_width(vc->gfx.ds) * vc->gfx.scale_x;
     fbh = surface_height(vc->gfx.ds) * vc->gfx.scale_y;
 
-    native = gtk_widget_get_native(vc->gfx.drawing_area);
-    surface = gtk_native_get_surface(native);
-    if (!surface) {
+    win = gtk_widget_get_window(vc->gfx.drawing_area);
+    if (!win) {
         return;
     }
-    sw = gdk_surface_get_width(surface);
-    sh = gdk_surface_get_height(surface);
+    ww = gdk_window_get_width(win);
+    wh = gdk_window_get_height(win);
 
     mx = my = 0;
-    if (sw > fbw) {
-        mx = (sw - fbw) / 2;
+    if (ww > fbw) {
+        mx = (ww - fbw) / 2;
     }
-    if (sh > fbh) {
-        my = (sh - fbh) / 2;
+    if (wh > fbh) {
+        my = (wh - fbh) / 2;
     }
 
-*/
-    // TODO: equivalent in GTK4?
-    gtk_widget_queue_draw(vc->gfx.drawing_area); // gtk_widget_queue_draw_area(vc->gfx.drawing_area, mx + x1, my + y1, (x2 - x1), (y2 - y1));
+    gtk_widget_queue_draw_area(vc->gfx.drawing_area,
+                               mx + x1, my + y1, (x2 - x1), (y2 - y1));
 }
 
 static void gd_refresh(DisplayChangeListener *dcl)
@@ -441,22 +440,19 @@ static void gd_mouse_set(DisplayChangeListener *dcl,
                          int x, int y, int visible)
 {
     VirtualConsole *vc = container_of(dcl, VirtualConsole, gfx.dcl);
-    //GdkDisplay *dpy;
-    //gint x_root, y_root;
+    GdkDisplay *dpy;
+    gint x_root, y_root;
 
     if (qemu_input_is_absolute()) {
         return;
     }
 
-
-    /*
     dpy = gtk_widget_get_display(vc->gfx.drawing_area);
     gdk_window_get_root_coords(gtk_widget_get_window(vc->gfx.drawing_area),
                                x, y, &x_root, &y_root);
     gdk_device_warp(gd_get_pointer(dpy),
                     gtk_widget_get_screen(vc->gfx.drawing_area),
                     x_root, y_root);
-                    */
     vc->s->last_x = x;
     vc->s->last_y = y;
 }
@@ -476,11 +472,11 @@ static void gd_cursor_define(DisplayChangeListener *dcl,
                                       GDK_COLORSPACE_RGB, true, 8,
                                       c->width, c->height, c->width * 4,
                                       NULL, NULL);
-    GdkTexture *texture = gdk_texture_new_for_pixbuf(pixbuf);
-    cursor = gdk_cursor_new_from_texture(texture, c->hot_x, c->hot_y, NULL);
-    gdk_surface_set_cursor(gtk_native_get_surface(gtk_widget_get_native(vc->gfx.drawing_area)), cursor);
+    cursor = gdk_cursor_new_from_pixbuf
+        (gtk_widget_get_display(vc->gfx.drawing_area),
+         pixbuf, c->hot_x, c->hot_y);
+    gdk_window_set_cursor(gtk_widget_get_window(vc->gfx.drawing_area), cursor);
     g_object_unref(pixbuf);
-    g_object_unref(texture);
     g_object_unref(cursor);
 }
 
@@ -639,7 +635,7 @@ static void gd_mouse_mode_change(Notifier *notify, void *data)
     s = container_of(notify, GtkDisplayState, mouse_mode_notifier);
     /* release the grab at switching to absolute mode */
     if (qemu_input_is_absolute() && gd_is_grab_active(s)) {
-        gtk_check_button_set_active(GTK_CHECK_BUTTON(s->grab_item),
+        gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(s->grab_item),
                                        FALSE);
     }
     for (i = 0; i < s->nb_vcs; i++) {
@@ -650,7 +646,7 @@ static void gd_mouse_mode_change(Notifier *notify, void *data)
 
 /** GTK Events **/
 
-static gboolean gd_window_close(GtkWidget *widget,
+static gboolean gd_window_close(GtkWidget *widget, GdkEvent *event,
                                 void *opaque)
 {
     GtkDisplayState *s = opaque;
@@ -667,7 +663,7 @@ static gboolean gd_window_close(GtkWidget *widget,
     return TRUE;
 }
 
-static void gd_set_ui_info(VirtualConsole *vc, int width, int height)
+static void gd_set_ui_info(VirtualConsole *vc, gint width, gint height)
 {
     QemuUIInfo info;
 
@@ -690,7 +686,8 @@ static gboolean gd_render_event(GtkGLArea *area, GdkGLContext *context,
     return TRUE;
 }
 
-static void gd_resize_event(GtkWidget *area, int width, int height, gpointer *opaque)
+static void gd_resize_event(GtkGLArea *area,
+                            gint width, gint height, gpointer *opaque)
 {
     VirtualConsole *vc = (void *)opaque;
 
@@ -723,7 +720,7 @@ int gd_monitor_update_interval(GtkWidget *widget)
     return 0;
 }
 
-static gboolean gd_draw_event(GtkDrawingArea *widget, cairo_t *cr, int width, int height, void *opaque)
+static gboolean gd_draw_event(GtkWidget *widget, cairo_t *cr, void *opaque)
 {
     VirtualConsole *vc = opaque;
     GtkDisplayState *s = vc->s;
@@ -760,8 +757,8 @@ static gboolean gd_draw_event(GtkDrawingArea *widget, cairo_t *cr, int width, in
     fbw = surface_width(vc->gfx.ds);
     fbh = surface_height(vc->gfx.ds);
 
-    ww = gdk_surface_get_width(gtk_native_get_surface(gtk_widget_get_native(widget)));
-    wh = gdk_surface_get_height(gtk_native_get_surface(gtk_widget_get_native(widget)));
+    ww = gdk_window_get_width(gtk_widget_get_window(widget));
+    wh = gdk_window_get_height(gtk_widget_get_window(widget));
 
     if (s->full_screen) {
         vc->gfx.scale_x = (double)ww / fbw;
@@ -805,7 +802,7 @@ static gboolean gd_draw_event(GtkDrawingArea *widget, cairo_t *cr, int width, in
     return TRUE;
 }
 
-static gboolean gd_motion_event(GtkWidget *widget, GdkEvent *motion,
+static gboolean gd_motion_event(GtkWidget *widget, GdkEventMotion *motion,
                                 void *opaque)
 {
     VirtualConsole *vc = opaque;
@@ -814,7 +811,6 @@ static gboolean gd_motion_event(GtkWidget *widget, GdkEvent *motion,
     int mx, my;
     int fbh, fbw;
     int ww, wh;
-    double motion_x, motion_y;
 
     if (!vc->gfx.ds) {
         return TRUE;
@@ -823,8 +819,8 @@ static gboolean gd_motion_event(GtkWidget *widget, GdkEvent *motion,
     fbw = surface_width(vc->gfx.ds) * vc->gfx.scale_x;
     fbh = surface_height(vc->gfx.ds) * vc->gfx.scale_y;
 
-    ww = gdk_surface_get_width(gtk_native_get_surface(gtk_widget_get_native(vc->gfx.drawing_area)));
-    wh = gdk_surface_get_height(gtk_native_get_surface(gtk_widget_get_native(vc->gfx.drawing_area)));
+    ww = gdk_window_get_width(gtk_widget_get_window(vc->gfx.drawing_area));
+    wh = gdk_window_get_height(gtk_widget_get_window(vc->gfx.drawing_area));
 
     mx = my = 0;
     if (ww > fbw) {
@@ -834,10 +830,8 @@ static gboolean gd_motion_event(GtkWidget *widget, GdkEvent *motion,
         my = (wh - fbh) / 2;
     }
 
-    gdk_event_get_position(motion, &motion_x, &motion_y);
-    
-    x = (motion_x - mx) / vc->gfx.scale_x;
-    y = (motion_y - my) / vc->gfx.scale_y;
+    x = (motion->x - mx) / vc->gfx.scale_x;
+    y = (motion->y - my) / vc->gfx.scale_y;
 
     if (qemu_input_is_absolute()) {
         if (x < 0 || y < 0 ||
@@ -860,16 +854,15 @@ static gboolean gd_motion_event(GtkWidget *widget, GdkEvent *motion,
     s->last_set = TRUE;
 
     if (!qemu_input_is_absolute() && s->ptr_owner == vc) {
+        GdkScreen *screen = gtk_widget_get_screen(vc->gfx.drawing_area);
         GdkDisplay *dpy = gtk_widget_get_display(widget);
-        GtkNative *native = gtk_widget_get_native(widget);
-        GdkSurface *surface = gtk_native_get_surface(native);
-        GdkMonitor *monitor = gdk_display_get_monitor_at_surface(dpy, surface);
+        GdkWindow *win = gtk_widget_get_window(widget);
+        GdkMonitor *monitor = gdk_display_get_monitor_at_window(dpy, win);
         GdkRectangle geometry;
         int screen_width, screen_height;
 
-        // TODO how do we get root positions?
-        //int x = (int)motion->x_root;
-        //int y = (int)motion->y_root;
+        int x = (int)motion->x_root;
+        int y = (int)motion->y_root;
 
         gdk_monitor_get_geometry(monitor, &geometry);
         screen_width = geometry.width;
@@ -895,33 +888,28 @@ static gboolean gd_motion_event(GtkWidget *widget, GdkEvent *motion,
             y -= 200;
         }
 
-        // TODO figure out root positions
-        //if (x != (int)motion->x_root || y != (int)motion->y_root) {
-        //    GdkDevice *dev = gdk_event_get_device((GdkEvent *)motion);
-        //    gdk_device_warp(dev, screen, x, y);
-        //    s->last_set = FALSE;
-        //    return FALSE;
-        //}
+        if (x != (int)motion->x_root || y != (int)motion->y_root) {
+            GdkDevice *dev = gdk_event_get_device((GdkEvent *)motion);
+            gdk_device_warp(dev, screen, x, y);
+            s->last_set = FALSE;
+            return FALSE;
+        }
     }
     return TRUE;
 }
 
-static gboolean gd_button_event(GtkWidget *widget, GdkEvent *button,
+static gboolean gd_button_event(GtkWidget *widget, GdkEventButton *button,
                                 void *opaque)
 {
     VirtualConsole *vc = opaque;
     GtkDisplayState *s = vc->s;
     InputButton btn;
-    guint button_num;
-    GType event_type;
 
-    button_num = gdk_button_event_get_button(button);
-    event_type = gdk_event_get_event_type(button);
     /* implicitly grab the input at the first click in the relative mode */
-    if (button_num == 1 && event_type == GDK_BUTTON_PRESS &&
+    if (button->button == 1 && button->type == GDK_BUTTON_PRESS &&
         !qemu_input_is_absolute() && s->ptr_owner != vc) {
-        if (!vc->surface) {
-            gtk_check_button_set_active(GTK_CHECK_BUTTON(s->grab_item),
+        if (!vc->window) {
+            gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(s->grab_item),
                                            TRUE);
         } else {
             gd_grab_pointer(vc, "relative-mode-click");
@@ -929,42 +917,42 @@ static gboolean gd_button_event(GtkWidget *widget, GdkEvent *button,
         return TRUE;
     }
 
-    if (button_num == 1) {
+    if (button->button == 1) {
         btn = INPUT_BUTTON_LEFT;
-    } else if (button_num == 2) {
+    } else if (button->button == 2) {
         btn = INPUT_BUTTON_MIDDLE;
-    } else if (button_num == 3) {
+    } else if (button->button == 3) {
         btn = INPUT_BUTTON_RIGHT;
-    } else if (button_num == 8) {
+    } else if (button->button == 8) {
         btn = INPUT_BUTTON_SIDE;
-    } else if (button_num == 9) {
+    } else if (button->button == 9) {
         btn = INPUT_BUTTON_EXTRA;
     } else {
         return TRUE;
     }
 
     qemu_input_queue_btn(vc->gfx.dcl.con, btn,
-                         event_type == GDK_BUTTON_PRESS);
+                         button->type == GDK_BUTTON_PRESS);
     qemu_input_event_sync();
     return TRUE;
 }
 
-static gboolean gd_scroll_event(GtkWidget *widget, GdkEvent *scroll,
+static gboolean gd_scroll_event(GtkWidget *widget, GdkEventScroll *scroll,
                                 void *opaque)
 {
     VirtualConsole *vc = opaque;
     InputButton btn;
-    GdkScrollDirection direction;
 
-    direction = gdk_scroll_event_get_direction(scroll);
-
-    if (direction == GDK_SCROLL_UP) {
+    if (scroll->direction == GDK_SCROLL_UP) {
         btn = INPUT_BUTTON_WHEEL_UP;
-    } else if (direction == GDK_SCROLL_DOWN) {
+    } else if (scroll->direction == GDK_SCROLL_DOWN) {
         btn = INPUT_BUTTON_WHEEL_DOWN;
-    } else if (direction == GDK_SCROLL_SMOOTH) {
-        double delta_x, delta_y;
-        gdk_scroll_event_get_deltas(scroll, &delta_x, &delta_y);
+    } else if (scroll->direction == GDK_SCROLL_SMOOTH) {
+        gdouble delta_x, delta_y;
+        if (!gdk_event_get_scroll_deltas((GdkEvent *)scroll,
+                                         &delta_x, &delta_y)) {
+            return TRUE;
+        }
         if (delta_y == 0) {
             return TRUE;
         } else if (delta_y > 0) {
@@ -1054,7 +1042,7 @@ static int gd_map_keycode(int scancode)
     return keycode_map[scancode];
 }
 
-static int gd_get_keycode(GdkEvent *key)
+static int gd_get_keycode(GdkEventKey *key)
 {
 #ifdef G_OS_WIN32
     int scancode = gdk_event_get_scancode((GdkEvent *)key);
@@ -1069,38 +1057,31 @@ static int gd_get_keycode(GdkEvent *key)
         0xe000 | (scancode & 0xff) : scancode & 0xff;
 
 #else
-    return gdk_key_event_get_keycode(key);
+    return key->hardware_keycode;
 #endif
 }
 
 static gboolean gd_text_key_down(GtkWidget *widget,
-                                 GdkEvent *key, void *opaque)
+                                 GdkEventKey *key, void *opaque)
 {
     VirtualConsole *vc = opaque;
     QemuConsole *con = vc->gfx.dcl.con;
-    guint keyval = gdk_key_event_get_keyval(key);
 
-    if (keyval == GDK_KEY_Delete) {
+    if (key->keyval == GDK_KEY_Delete) {
         kbd_put_qcode_console(con, Q_KEY_CODE_DELETE, false);
+    } else if (key->length) {
+        kbd_put_string_console(con, key->string, key->length);
     } else {
-        const char* name = gdk_keyval_name(keyval);
-        size_t len = strlen(name);
-        if (len) {
-            kbd_put_string_console(con, name, len);
-        } else {
-            int qcode = gd_map_keycode(gd_get_keycode(key));
-            kbd_put_qcode_console(con, qcode, false);
-        }
+        int qcode = gd_map_keycode(gd_get_keycode(key));
+        kbd_put_qcode_console(con, qcode, false);
     }
     return TRUE;
 }
 
-static gboolean gd_key_event(GtkWidget *widget, GdkEvent *key, void *opaque)
+static gboolean gd_key_event(GtkWidget *widget, GdkEventKey *key, void *opaque)
 {
     VirtualConsole *vc = opaque;
     int keycode, qcode;
-    guint keyval = gdk_key_event_get_keyval(key);
-    GdkEventType type = gdk_event_get_event_type(key);
 
 #ifdef G_OS_WIN32
     /* on windows, we ought to ignore the reserved key event? */
@@ -1115,7 +1096,7 @@ static gboolean gd_key_event(GtkWidget *widget, GdkEvent *key, void *opaque)
     }
 #endif
 
-    if (keyval == GDK_KEY_Pause
+    if (key->keyval == GDK_KEY_Pause
 #ifdef G_OS_WIN32
         /* for some reason GDK does not fill keyval for VK_PAUSE
          * See https://bugzilla.gnome.org/show_bug.cgi?id=769214
@@ -1124,7 +1105,7 @@ static gboolean gd_key_event(GtkWidget *widget, GdkEvent *key, void *opaque)
 #endif
         ) {
         qkbd_state_key_event(vc->gfx.kbd, Q_KEY_CODE_PAUSE,
-                             type == GDK_KEY_PRESS);
+                             key->type == GDK_KEY_PRESS);
         return TRUE;
     }
 
@@ -1132,16 +1113,16 @@ static gboolean gd_key_event(GtkWidget *widget, GdkEvent *key, void *opaque)
     qcode = gd_map_keycode(keycode);
 
     trace_gd_key_event(vc->label, keycode, qcode,
-                       (type == GDK_KEY_PRESS) ? "down" : "up");
+                       (key->type == GDK_KEY_PRESS) ? "down" : "up");
 
     qkbd_state_key_event(vc->gfx.kbd, qcode,
-                         type == GDK_KEY_PRESS);
+                         key->type == GDK_KEY_PRESS);
 
     return TRUE;
 }
 
 static gboolean gd_grab_broken_event(GtkWidget *widget,
-                                     GdkEvent *event, void *opaque)
+                                     GdkEventGrabBroken *event, void *opaque)
 {
 #ifdef CONFIG_WIN32
     /*
@@ -1161,15 +1142,15 @@ static gboolean gd_grab_broken_event(GtkWidget *widget,
 
 static gboolean gd_event(GtkWidget *widget, GdkEvent *event, void *opaque)
 {
-    if (gdk_event_get_event_type(event) == GDK_MOTION_NOTIFY) {
-        return gd_motion_event(widget, event, opaque);
+    if (event->type == GDK_MOTION_NOTIFY) {
+        return gd_motion_event(widget, &event->motion, opaque);
     }
     return FALSE;
 }
 
 /** Window Menu Actions **/
 
-static void gd_menu_pause(GAction *action, GVariant *args, gpointer opaque)
+static void gd_menu_pause(GtkMenuItem *item, void *opaque)
 {
     GtkDisplayState *s = opaque;
 
@@ -1178,29 +1159,27 @@ static void gd_menu_pause(GAction *action, GVariant *args, gpointer opaque)
     }
     if (runstate_is_running()) {
         qmp_stop(NULL);
-        g_simple_action_set_state(G_SIMPLE_ACTION(action), g_variant_new_boolean(TRUE));
     } else {
         qmp_cont(NULL);
-        g_simple_action_set_state(G_SIMPLE_ACTION(action), g_variant_new_boolean(FALSE));
     }
 }
 
-static void gd_menu_reset(GAction *item, GVariant *args, gpointer opaque)
+static void gd_menu_reset(GtkMenuItem *item, void *opaque)
 {
     qmp_system_reset(NULL);
 }
 
-static void gd_menu_powerdown(GAction *item, GVariant *args, gpointer opaque)
+static void gd_menu_powerdown(GtkMenuItem *item, void *opaque)
 {
     qmp_system_powerdown(NULL);
 }
 
-static void gd_menu_quit(GAction *item, GVariant *args, gpointer opaque)
+static void gd_menu_quit(GtkMenuItem *item, void *opaque)
 {
     qmp_quit(NULL);
 }
 
-static void gd_menu_switch_vc(/*GtkMenuItem*/void *item, void *opaque)
+static void gd_menu_switch_vc(GtkMenuItem *item, void *opaque)
 {
     GtkDisplayState *s = opaque;
     VirtualConsole *vc = gd_vc_find_by_menu(s);
@@ -1215,18 +1194,19 @@ static void gd_menu_switch_vc(/*GtkMenuItem*/void *item, void *opaque)
     }
 }
 
-static void gd_accel_switch_vc(GtkWidget* widget, GVariant* args, gpointer opaque)
+static void gd_accel_switch_vc(void *opaque)
 {
     VirtualConsole *vc = opaque;
-    gtk_check_button_set_active(GTK_CHECK_BUTTON(vc->menu_item), TRUE);
+
+    gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(vc->menu_item), TRUE);
 }
 
-static void gd_menu_show_tabs(/*GtkMenuItem*/void *item, void *opaque)
+static void gd_menu_show_tabs(GtkMenuItem *item, void *opaque)
 {
     GtkDisplayState *s = opaque;
     VirtualConsole *vc = gd_vc_find_current(s);
 
-    if (gtk_check_button_get_active(GTK_CHECK_BUTTON(s->show_tabs_item))) {
+    if (gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(s->show_tabs_item))) {
         gtk_notebook_set_show_tabs(GTK_NOTEBOOK(s->notebook), TRUE);
     } else {
         gtk_notebook_set_show_tabs(GTK_NOTEBOOK(s->notebook), FALSE);
@@ -1234,7 +1214,8 @@ static void gd_menu_show_tabs(/*GtkMenuItem*/void *item, void *opaque)
     gd_update_windowsize(vc);
 }
 
-static gboolean gd_tab_window_close(GtkWidget *widget, void *opaque)
+static gboolean gd_tab_window_close(GtkWidget *widget, GdkEvent *event,
+                                    void *opaque)
 {
     VirtualConsole *vc = opaque;
     GtkDisplayState *s = vc->s;
@@ -1243,12 +1224,12 @@ static gboolean gd_tab_window_close(GtkWidget *widget, void *opaque)
     gd_widget_reparent(vc->window, s->notebook, vc->tab_item);
     gtk_notebook_set_tab_label_text(GTK_NOTEBOOK(s->notebook),
                                     vc->tab_item, vc->label);
-    gtk_window_destroy(GTK_WINDOW(vc->window));
+    gtk_widget_destroy(vc->window);
     vc->window = NULL;
     return TRUE;
 }
 
-static gboolean gd_win_grab(GtkWidget* widget, GVariant* args, gpointer opaque)
+static gboolean gd_win_grab(void *opaque)
 {
     VirtualConsole *vc = opaque;
 
@@ -1261,36 +1242,32 @@ static gboolean gd_win_grab(GtkWidget* widget, GVariant* args, gpointer opaque)
     return TRUE;
 }
 
-static void gd_menu_untabify(/*GtkMenuItem*/void *item, void *opaque)
+static void gd_menu_untabify(GtkMenuItem *item, void *opaque)
 {
     GtkDisplayState *s = opaque;
     VirtualConsole *vc = gd_vc_find_current(s);
 
     if (vc->type == GD_VC_GFX &&
         qemu_console_is_graphic(vc->gfx.dcl.con)) {
-        gtk_check_button_set_active(GTK_CHECK_BUTTON(s->grab_item),
+        gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(s->grab_item),
                                        FALSE);
     }
     if (!vc->window) {
         gtk_widget_set_sensitive(vc->menu_item, false);
-        GdkDisplay* display = gtk_widget_get_display(vc->window);
         vc->window = gtk_window_new();
-        vc->surface = (GtkWidget*)gdk_surface_new_toplevel(display);
         gd_widget_reparent(s->notebook, vc->window, vc->tab_item);
 
         g_signal_connect(vc->window, "destroy",
                          G_CALLBACK(gd_tab_window_close), vc);
-        gtk_widget_show(vc->window);
+        gtk_widget_show_all(vc->window);
 
         if (qemu_console_is_graphic(vc->gfx.dcl.con)) {
-            GtkEventController* sc = gtk_shortcut_controller_new();
-            gtk_widget_add_controller(vc->window, sc);
+            GtkAccelGroup *ag = gtk_accel_group_new();
+            gtk_window_add_accel_group(GTK_WINDOW(vc->window), ag);
 
-            GtkShortcutTrigger *trigger = gtk_keyval_trigger_new(GDK_KEY_g, HOTKEY_MODIFIERS);
-            GtkShortcutFunc callback = (GtkShortcutFunc)gd_win_grab;
-            GtkShortcutAction *action = gtk_callback_action_new(callback, vc, NULL);
-            GtkShortcut *shortcut = gtk_shortcut_new(trigger, action);
-            gtk_shortcut_controller_add_shortcut((GtkShortcutController *)sc, shortcut);
+            GClosure *cb = g_cclosure_new_swap(G_CALLBACK(gd_win_grab),
+                                               vc, NULL);
+            gtk_accel_group_connect(ag, GDK_KEY_g, HOTKEY_MODIFIERS, 0, cb);
         }
 
         gd_update_geometry_hints(vc);
@@ -1298,7 +1275,7 @@ static void gd_menu_untabify(/*GtkMenuItem*/void *item, void *opaque)
     }
 }
 
-static void gd_menu_show_menubar(/*GtkMenuItem*/void *item, void *opaque)
+static void gd_menu_show_menubar(GtkMenuItem *item, void *opaque)
 {
     GtkDisplayState *s = opaque;
     VirtualConsole *vc = gd_vc_find_current(s);
@@ -1307,8 +1284,8 @@ static void gd_menu_show_menubar(/*GtkMenuItem*/void *item, void *opaque)
         return;
     }
 
-    if (gtk_check_button_get_active(
-                GTK_CHECK_BUTTON(s->show_menubar_item))) {
+    if (gtk_check_menu_item_get_active(
+                GTK_CHECK_MENU_ITEM(s->show_menubar_item))) {
         gtk_widget_show(s->menu_bar);
     } else {
         gtk_widget_hide(s->menu_bar);
@@ -1318,13 +1295,11 @@ static void gd_menu_show_menubar(/*GtkMenuItem*/void *item, void *opaque)
 
 static void gd_accel_show_menubar(void *opaque)
 {
-    // TODO how do we activate?
     GtkDisplayState *s = opaque;
-    //gtk_button_activate(GTK_BUTTON(s->show_menubar_item));
-    gtk_application_window_set_show_menubar(GTK_APPLICATION_WINDOW(s->window), true);
+    gtk_menu_item_activate(GTK_MENU_ITEM(s->show_menubar_item));
 }
 
-static void gd_menu_full_screen(GAction *item, GVariant *args, gpointer opaque)
+static void gd_menu_full_screen(GtkMenuItem *item, void *opaque)
 {
     GtkDisplayState *s = opaque;
     VirtualConsole *vc = gd_vc_find_current(s);
@@ -1339,9 +1314,9 @@ static void gd_menu_full_screen(GAction *item, GVariant *args, gpointer opaque)
         s->full_screen = TRUE;
     } else {
         gtk_window_unfullscreen(GTK_WINDOW(s->window));
-        gd_menu_show_tabs(GTK_BUTTON(s->show_tabs_item), s);
-        if (gtk_check_button_get_active(
-                    GTK_CHECK_BUTTON(s->show_menubar_item))) {
+        gd_menu_show_tabs(GTK_MENU_ITEM(s->show_tabs_item), s);
+        if (gtk_check_menu_item_get_active(
+                    GTK_CHECK_MENU_ITEM(s->show_menubar_item))) {
             gtk_widget_show(s->menu_bar);
         }
         s->full_screen = FALSE;
@@ -1355,19 +1330,18 @@ static void gd_menu_full_screen(GAction *item, GVariant *args, gpointer opaque)
     gd_update_cursor(vc);
 }
 
-static void gd_accel_full_screen(GtkWidget* widget, GVariant* args, gpointer opaque)
+static void gd_accel_full_screen(void *opaque)
 {
-    // TODO how do we activate?
     GtkDisplayState *s = opaque;
-    gtk_check_button_set_active(GTK_CHECK_BUTTON(s->full_screen_item), true);
+    gtk_menu_item_activate(GTK_MENU_ITEM(s->full_screen_item));
 }
 
-static void gd_menu_zoom_in(/*GtkMenuItem*/void *item, void *opaque)
+static void gd_menu_zoom_in(GtkMenuItem *item, void *opaque)
 {
     GtkDisplayState *s = opaque;
     VirtualConsole *vc = gd_vc_find_current(s);
 
-    gtk_check_button_set_active(GTK_CHECK_BUTTON(s->zoom_fit_item),
+    gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(s->zoom_fit_item),
                                    FALSE);
 
     vc->gfx.scale_x += VC_SCALE_STEP;
@@ -1378,17 +1352,16 @@ static void gd_menu_zoom_in(/*GtkMenuItem*/void *item, void *opaque)
 
 static void gd_accel_zoom_in(void *opaque)
 {
-    // TODO how do I activate
     GtkDisplayState *s = opaque;
-    gtk_check_button_set_active(GTK_CHECK_BUTTON(s->zoom_in_item), true);
+    gtk_menu_item_activate(GTK_MENU_ITEM(s->zoom_in_item));
 }
 
-static void gd_menu_zoom_out(/*GtkMenuItem*/void *item, void *opaque)
+static void gd_menu_zoom_out(GtkMenuItem *item, void *opaque)
 {
     GtkDisplayState *s = opaque;
     VirtualConsole *vc = gd_vc_find_current(s);
 
-    gtk_check_button_set_active(GTK_CHECK_BUTTON(s->zoom_fit_item),
+    gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(s->zoom_fit_item),
                                    FALSE);
 
     vc->gfx.scale_x -= VC_SCALE_STEP;
@@ -1400,7 +1373,7 @@ static void gd_menu_zoom_out(/*GtkMenuItem*/void *item, void *opaque)
     gd_update_windowsize(vc);
 }
 
-static void gd_menu_zoom_fixed(/*GtkMenuItem*/void *item, void *opaque)
+static void gd_menu_zoom_fixed(GtkMenuItem *item, void *opaque)
 {
     GtkDisplayState *s = opaque;
     VirtualConsole *vc = gd_vc_find_current(s);
@@ -1411,12 +1384,12 @@ static void gd_menu_zoom_fixed(/*GtkMenuItem*/void *item, void *opaque)
     gd_update_windowsize(vc);
 }
 
-static void gd_menu_zoom_fit(/*GtkMenuItem*/void *item, void *opaque)
+static void gd_menu_zoom_fit(GtkMenuItem *item, void *opaque)
 {
     GtkDisplayState *s = opaque;
     VirtualConsole *vc = gd_vc_find_current(s);
 
-    if (gtk_check_button_get_active(GTK_CHECK_BUTTON(s->zoom_fit_item))) {
+    if (gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(s->zoom_fit_item))) {
         s->free_scale = TRUE;
     } else {
         s->free_scale = FALSE;
@@ -1430,12 +1403,9 @@ static void gd_menu_zoom_fit(/*GtkMenuItem*/void *item, void *opaque)
 
 static void gd_grab_update(VirtualConsole *vc, bool kbd, bool ptr)
 {
-    /*
-    // TODO do not need these anymore?
     GdkDisplay *display = gtk_widget_get_display(vc->gfx.drawing_area);
     GdkSeat *seat = gdk_display_get_default_seat(display);
-    GtkNative* native = gtk_widget_get_native(vc->gfx.drawing_area);
-    GdkSurface *surface = gtk_native_get_surface(native);
+    GdkWindow *window = gtk_widget_get_window(vc->gfx.drawing_area);
     GdkSeatCapabilities caps = 0;
     GdkCursor *cursor = NULL;
 
@@ -1448,12 +1418,11 @@ static void gd_grab_update(VirtualConsole *vc, bool kbd, bool ptr)
     }
 
     if (caps) {
-        //gdk_seat_grab(seat, surface, caps, false, cursor,
-            //          NULL, NULL, NULL);
+        gdk_seat_grab(seat, window, caps, false, cursor,
+                      NULL, NULL, NULL);
     } else {
-        //gdk_seat_ungrab(seat);
+        gdk_seat_ungrab(seat);
     }
-    */
 }
 
 static void gd_grab_keyboard(VirtualConsole *vc, const char *reason)
@@ -1491,7 +1460,6 @@ static void gd_ungrab_keyboard(GtkDisplayState *s)
 static void gd_grab_pointer(VirtualConsole *vc, const char *reason)
 {
     GdkDisplay *display = gtk_widget_get_display(vc->gfx.drawing_area);
-    GdkSurface *surface = gtk_native_get_surface(gtk_widget_get_native(vc->gfx.drawing_area));
 
     if (vc->s->ptr_owner) {
         if (vc->s->ptr_owner == vc) {
@@ -1502,12 +1470,8 @@ static void gd_grab_pointer(VirtualConsole *vc, const char *reason)
     }
 
     gd_grab_update(vc, vc->s->kbd_owner == vc, true);
-    // TODO equivalent?
-    double x, y;
-    gdk_surface_get_device_position(surface, gd_get_pointer(display), &x, &y, NULL); // <- gdk_device_get_position(gd_get_pointer(display),
-    //                        NULL, &vc->s->grab_x_root, &vc->s->grab_y_root);
-    vc->s->grab_x_root = (int)x;
-    vc->s->grab_y_root = (int)y;
+    gdk_device_get_position(gd_get_pointer(display),
+                            NULL, &vc->s->grab_x_root, &vc->s->grab_y_root);
     vc->s->ptr_owner = vc;
     gd_update_caption(vc->s);
     trace_gd_grab(vc->label, "ptr", reason);
@@ -1516,24 +1480,23 @@ static void gd_grab_pointer(VirtualConsole *vc, const char *reason)
 static void gd_ungrab_pointer(GtkDisplayState *s)
 {
     VirtualConsole *vc = s->ptr_owner;
-    //GdkDisplay *display;
+    GdkDisplay *display;
 
     if (vc == NULL) {
         return;
     }
     s->ptr_owner = NULL;
 
-   //display = gtk_widget_get_display(vc->gfx.drawing_area);
+    display = gtk_widget_get_display(vc->gfx.drawing_area);
     gd_grab_update(vc, vc->s->kbd_owner == vc, false);
-    // TODO warp?
-   // gdk_device_warp(gd_get_pointer(display),
-   //                 gtk_widget_get_screen(vc->gfx.drawing_area),
-   //                 vc->s->grab_x_root, vc->s->grab_y_root);
+    gdk_device_warp(gd_get_pointer(display),
+                    gtk_widget_get_screen(vc->gfx.drawing_area),
+                    vc->s->grab_x_root, vc->s->grab_y_root);
     gd_update_caption(s);
     trace_gd_ungrab(vc->label, "ptr");
 }
 
-static void gd_menu_grab_input(/*GtkMenuItem*/void *item, void *opaque)
+static void gd_menu_grab_input(GtkMenuItem *item, void *opaque)
 {
     GtkDisplayState *s = opaque;
     VirtualConsole *vc = gd_vc_find_current(s);
@@ -1564,15 +1527,15 @@ static void gd_change_page(GtkNotebook *nb, gpointer arg1, guint arg2,
     if (!vc) {
         return;
     }
-    gtk_check_button_set_active(GTK_CHECK_BUTTON(vc->menu_item),
+    gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(vc->menu_item),
                                    TRUE);
     on_vga = (vc->type == GD_VC_GFX &&
               qemu_console_is_graphic(vc->gfx.dcl.con));
     if (!on_vga) {
-        gtk_check_button_set_active(GTK_CHECK_BUTTON(s->grab_item),
+        gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(s->grab_item),
                                        FALSE);
     } else if (s->full_screen) {
-        gtk_check_button_set_active(GTK_CHECK_BUTTON(s->grab_item),
+        gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(s->grab_item),
                                        TRUE);
     }
     gtk_widget_set_sensitive(s->grab_item, on_vga);
@@ -1584,7 +1547,7 @@ static void gd_change_page(GtkNotebook *nb, gpointer arg1, guint arg2,
     gd_update_cursor(vc);
 }
 
-static gboolean gd_enter_event(GtkWidget *widget, GdkEvent *crossing,
+static gboolean gd_enter_event(GtkWidget *widget, GdkEventCrossing *crossing,
                                gpointer opaque)
 {
     VirtualConsole *vc = opaque;
@@ -1596,7 +1559,7 @@ static gboolean gd_enter_event(GtkWidget *widget, GdkEvent *crossing,
     return TRUE;
 }
 
-static gboolean gd_leave_event(GtkWidget *widget, GdkEvent *crossing,
+static gboolean gd_leave_event(GtkWidget *widget, GdkEventCrossing *crossing,
                                gpointer opaque)
 {
     VirtualConsole *vc = opaque;
@@ -1609,7 +1572,7 @@ static gboolean gd_leave_event(GtkWidget *widget, GdkEvent *crossing,
 }
 
 static gboolean gd_focus_in_event(GtkWidget *widget,
-                                  GdkEvent *event, gpointer opaque)
+                                  GdkEventFocus *event, gpointer opaque)
 {
     VirtualConsole *vc = opaque;
 
@@ -1618,7 +1581,7 @@ static gboolean gd_focus_in_event(GtkWidget *widget,
 }
 
 static gboolean gd_focus_out_event(GtkWidget *widget,
-                                   GdkEvent *event, gpointer opaque)
+                                   GdkEventFocus *event, gpointer opaque)
 {
     VirtualConsole *vc = opaque;
     GtkDisplayState *s = vc->s;
@@ -1629,45 +1592,36 @@ static gboolean gd_focus_out_event(GtkWidget *widget,
 }
 
 static gboolean gd_configure(GtkWidget *widget,
-                             GdkEvent *cfg, gpointer opaque)
+                             GdkEventConfigure *cfg, gpointer opaque)
 {
-    // TODO How about configure events? Window property notification?
-    //VirtualConsole *vc = opaque;
-    //gd_set_ui_info(vc, cfg->width, cfg->height);
+    VirtualConsole *vc = opaque;
+
+    gd_set_ui_info(vc, cfg->width, cfg->height);
     return FALSE;
 }
 
 /** Virtual Console Callbacks **/
 
-static GList *gd_vc_menu_init(GtkDisplayState *s, VirtualConsole *vc,
-                               int idx, GList *group, GtkWidget *view_menu)
+static GSList *gd_vc_menu_init(GtkDisplayState *s, VirtualConsole *vc,
+                               int idx, GSList *group, GtkWidget *view_menu)
 {
-    vc->menu_item = gtk_check_button_new_with_mnemonic(vc->label);
-    
-    gtk_check_button_set_group((GtkCheckButton*)vc->menu_item, (GtkCheckButton*)group);
-    
-    GtkShortcutTrigger *trigger = gtk_keyval_trigger_new(GDK_KEY_1 + idx, HOTKEY_MODIFIERS);
-    GtkShortcutAction *action = gtk_callback_action_new((GtkShortcutFunc)gd_accel_switch_vc, vc, NULL);
-    GtkShortcut *shortcut = gtk_shortcut_new(trigger, action);
-    gtk_shortcut_controller_add_shortcut(GTK_SHORTCUT_CONTROLLER(s->shortcut_controller), shortcut);
-    
-   // gtk_widget_add_controller(gtk_check_button_get_child(GTK_BUTTON(vc->menu_item)),
-    //    (GtkEventController*)s->shortcut_controller
-    //);
+    vc->menu_item = gtk_radio_menu_item_new_with_mnemonic(group, vc->label);
+    gtk_accel_group_connect(s->accel_group, GDK_KEY_1 + idx,
+            HOTKEY_MODIFIERS, 0,
+            g_cclosure_new_swap(G_CALLBACK(gd_accel_switch_vc), vc, NULL));
+    gtk_accel_label_set_accel(
+            GTK_ACCEL_LABEL(gtk_bin_get_child(GTK_BIN(vc->menu_item))),
+            GDK_KEY_1 + idx, HOTKEY_MODIFIERS);
 
-    //gtk_accel_label_set_accel(
-    //        GTK_ACCEL_LABEL(gtk_bin_get_child(GTK_BUTTON(vc->menu_item))),
-    //        GDK_KEY_1 + idx, HOTKEY_MODIFIERS);
+    g_signal_connect(vc->menu_item, "activate",
+                     G_CALLBACK(gd_menu_switch_vc), s);
+    gtk_menu_shell_append(GTK_MENU_SHELL(view_menu), vc->menu_item);
 
-    //g_signal_connect(vc->menu_item, "activate",
-    //                 G_CALLBACK(gd_menu_switch_vc), s);
-    //gtk_popover_menu_add_child(GTK_POPOVER_MENU(view_menu), vc->menu_item, NULL);
-
-    return NULL;
+    return gtk_radio_menu_item_get_group(GTK_RADIO_MENU_ITEM(vc->menu_item));
 }
 
 #if defined(CONFIG_VTE)
-static void gd_menu_copy(/*GtkMenuItem*/void *item, void *opaque)
+static void gd_menu_copy(GtkMenuItem *item, void *opaque)
 {
     GtkDisplayState *s = opaque;
     VirtualConsole *vc = gd_vc_find_current(s);
@@ -1871,95 +1825,75 @@ static void gd_vcs_init(GtkDisplayState *s, GSList *group,
 
 static void gd_connect_vc_gfx_signals(VirtualConsole *vc)
 {
-    // TODO invalid signals
-    // draw, event, button-press-event, button-release-event, scroll-event, key-press-event, key-release-event, enter-notify-event, leave-notify-event, focus-in-event, configure-event, grab-broken-event
-    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(vc->gfx.drawing_area), gd_draw_event, vc, NULL);
+    g_signal_connect(vc->gfx.drawing_area, "draw",
+                     G_CALLBACK(gd_draw_event), vc);
 #if defined(CONFIG_OPENGL)
     if (gtk_use_gl_area) {
         /* wire up GtkGlArea events */
         g_signal_connect(vc->gfx.drawing_area, "render",
                          G_CALLBACK(gd_render_event), vc);
-
-        g_signal_connect(vc->gfx.drawing_area, "resize", // TODO or connect_after?
+        g_signal_connect(vc->gfx.drawing_area, "resize",
                          G_CALLBACK(gd_resize_event), vc);
     }
 #endif
-   // if (qemu_console_is_graphic(vc->gfx.dcl.con)) {
-   //     g_signal_connect(vc->gfx.drawing_area, "event",
-   //                      G_CALLBACK(gd_event), vc);
-   //     g_signal_connect(vc->gfx.drawing_area, "button-press-event",
-   //                      G_CALLBACK(gd_button_event), vc);
-   //     g_signal_connect(vc->gfx.drawing_area, "button-release-event",
-   //                      G_CALLBACK(gd_button_event), vc);
-   //     g_signal_connect(vc->gfx.drawing_area, "scroll-event",
-   //                      G_CALLBACK(gd_scroll_event), vc);
-   //     g_signal_connect(vc->gfx.drawing_area, "key-press-event",
-   //                      G_CALLBACK(gd_key_event), vc);
-   //     g_signal_connect(vc->gfx.drawing_area, "key-release-event",
-   //                      G_CALLBACK(gd_key_event), vc);
-//
-   //     g_signal_connect(vc->gfx.drawing_area, "enter-notify-event",
-   //                      G_CALLBACK(gd_enter_event), vc);
-   //     g_signal_connect(vc->gfx.drawing_area, "leave-notify-event",
-   //                      G_CALLBACK(gd_leave_event), vc);
-   //     g_signal_connect(vc->gfx.drawing_area, "focus-in-event",
-   //                      G_CALLBACK(gd_focus_in_event), vc);
-   //     g_signal_connect(vc->gfx.drawing_area, "focus-out-event",
-   //                      G_CALLBACK(gd_focus_out_event), vc);
-   //     g_signal_connect(vc->gfx.drawing_area, "configure-event",
-   //                      G_CALLBACK(gd_configure), vc);
-   //     g_signal_connect(vc->gfx.drawing_area, "grab-broken-event",
-   //                      G_CALLBACK(gd_grab_broken_event), vc);
-   // } else {
-   //     g_signal_connect(vc->gfx.drawing_area, "key-press-event",
-   //                      G_CALLBACK(gd_text_key_down), vc);
-   // }
+    if (qemu_console_is_graphic(vc->gfx.dcl.con)) {
+        g_signal_connect(vc->gfx.drawing_area, "event",
+                         G_CALLBACK(gd_event), vc);
+        g_signal_connect(vc->gfx.drawing_area, "button-press-event",
+                         G_CALLBACK(gd_button_event), vc);
+        g_signal_connect(vc->gfx.drawing_area, "button-release-event",
+                         G_CALLBACK(gd_button_event), vc);
+        g_signal_connect(vc->gfx.drawing_area, "scroll-event",
+                         G_CALLBACK(gd_scroll_event), vc);
+        g_signal_connect(vc->gfx.drawing_area, "key-press-event",
+                         G_CALLBACK(gd_key_event), vc);
+        g_signal_connect(vc->gfx.drawing_area, "key-release-event",
+                         G_CALLBACK(gd_key_event), vc);
+
+        g_signal_connect(vc->gfx.drawing_area, "enter-notify-event",
+                         G_CALLBACK(gd_enter_event), vc);
+        g_signal_connect(vc->gfx.drawing_area, "leave-notify-event",
+                         G_CALLBACK(gd_leave_event), vc);
+        g_signal_connect(vc->gfx.drawing_area, "focus-in-event",
+                         G_CALLBACK(gd_focus_in_event), vc);
+        g_signal_connect(vc->gfx.drawing_area, "focus-out-event",
+                         G_CALLBACK(gd_focus_out_event), vc);
+        g_signal_connect(vc->gfx.drawing_area, "configure-event",
+                         G_CALLBACK(gd_configure), vc);
+        g_signal_connect(vc->gfx.drawing_area, "grab-broken-event",
+                         G_CALLBACK(gd_grab_broken_event), vc);
+    } else {
+        g_signal_connect(vc->gfx.drawing_area, "key-press-event",
+                         G_CALLBACK(gd_text_key_down), vc);
+    }
 }
 
 static void gd_connect_signals(GtkDisplayState *s)
 {
-    s->machine_actions = g_simple_action_group_new();
-    s->view_actions = g_simple_action_group_new();
+    g_signal_connect(s->show_tabs_item, "activate",
+                     G_CALLBACK(gd_menu_show_tabs), s);
+    g_signal_connect(s->untabify_item, "activate",
+                     G_CALLBACK(gd_menu_untabify), s);
+    g_signal_connect(s->show_menubar_item, "activate",
+                     G_CALLBACK(gd_menu_show_menubar), s);
 
-   // g_signal_connect(s->show_tabs_item, "activate",
-   //                  G_CALLBACK(gd_menu_show_tabs), s);
-   // g_signal_connect(s->untabify_item, "activate",
-   //                  G_CALLBACK(gd_menu_untabify), s);
-   // g_signal_connect(s->show_menubar_item, "activate",
-   //                  G_CALLBACK(gd_menu_show_menubar), s);
-
-    g_signal_connect(s->window, "close-request",
+    g_signal_connect(s->window, "delete-event",
                      G_CALLBACK(gd_window_close), s);
 
-    s->pause_state = g_variant_new_boolean(FALSE);
-    GSimpleAction *act_pause = g_simple_action_new_stateful("pause", NULL, s->pause_state);
-    g_signal_connect(G_OBJECT(act_pause), "activate", G_CALLBACK(gd_menu_pause), s);
-    g_action_map_add_action(G_ACTION_MAP(s->machine_actions), G_ACTION(act_pause));
-
-    GSimpleAction *act_reset = g_simple_action_new("reset", NULL);
-    g_signal_connect(act_reset, "activate", G_CALLBACK(gd_menu_reset), s);
-    g_action_map_add_action(G_ACTION_MAP(s->machine_actions), G_ACTION(act_reset));
-
-    GSimpleAction *act_powerdown = g_simple_action_new("powerdown", NULL);
-    g_signal_connect(act_powerdown, "activate", G_CALLBACK(gd_menu_powerdown), s);
-    g_action_map_add_action(G_ACTION_MAP(s->machine_actions), G_ACTION(act_powerdown));
-
-    GSimpleAction *act_quit = g_simple_action_new("quit", NULL);
-    g_signal_connect(act_quit, "activate", G_CALLBACK(gd_menu_quit), s);
-    g_action_map_add_action(G_ACTION_MAP(s->machine_actions), G_ACTION(act_quit));
-
-                     /*
+    g_signal_connect(s->pause_item, "activate",
+                     G_CALLBACK(gd_menu_pause), s);
+    g_signal_connect(s->reset_item, "activate",
+                     G_CALLBACK(gd_menu_reset), s);
+    g_signal_connect(s->powerdown_item, "activate",
+                     G_CALLBACK(gd_menu_powerdown), s);
+    g_signal_connect(s->quit_item, "activate",
+                     G_CALLBACK(gd_menu_quit), s);
 #if defined(CONFIG_VTE)
     g_signal_connect(s->copy_item, "activate",
                      G_CALLBACK(gd_menu_copy), s);
 #endif
-*/
-
-    GSimpleAction *act_fullscreen = g_simple_action_new("fullscreen", NULL);
-    g_signal_connect(act_fullscreen, "activate", G_CALLBACK(gd_menu_full_screen), s);
-    g_action_map_add_action(G_ACTION_MAP(s->view_actions), G_ACTION(act_fullscreen));
-
-/*
+    g_signal_connect(s->full_screen_item, "activate",
+                     G_CALLBACK(gd_menu_full_screen), s);
     g_signal_connect(s->zoom_in_item, "activate",
                      G_CALLBACK(gd_menu_zoom_in), s);
     g_signal_connect(s->zoom_out_item, "activate",
@@ -1972,40 +1906,38 @@ static void gd_connect_signals(GtkDisplayState *s)
                      G_CALLBACK(gd_menu_grab_input), s);
     g_signal_connect(s->notebook, "switch-page",
                      G_CALLBACK(gd_change_page), s);
-    */
 }
 
 static GtkWidget *gd_create_menu_machine(GtkDisplayState *s)
 {
     GtkWidget *machine_menu;
-    //GtkWidget *separator;
-    GMenu *model = g_menu_new();
-    //gtk_widget_add_controller(machine_menu, (GtkEventController*)s->shortcut_controller);
+    GtkWidget *separator;
 
-    GMenuItem* pause_item = g_menu_item_new(_("_Pause"), NULL);
-   // s->pause_item = gtk_menu_button_new(/*_("_Pause")*/);
-    g_menu_append_item(model, G_MENU_ITEM(pause_item));
+    machine_menu = gtk_menu_new();
+    gtk_menu_set_accel_group(GTK_MENU(machine_menu), s->accel_group);
 
-    //separator = gtk_separator_menu_item_new();
-    //gtk_menu_shell_append(GTK_POPOVER_MENU(machine_menu), separator);
+    s->pause_item = gtk_check_menu_item_new_with_mnemonic(_("_Pause"));
+    gtk_menu_shell_append(GTK_MENU_SHELL(machine_menu), s->pause_item);
 
-    //s->reset_item = gtk_button_new_with_mnemonic(_("_Reset"));
-    //gtk_menu_shell_append(GTK_POPOVER_MENU(machine_menu), s->reset_item);
+    separator = gtk_separator_menu_item_new();
+    gtk_menu_shell_append(GTK_MENU_SHELL(machine_menu), separator);
 
-    //s->powerdown_item = gtk_button_new_with_mnemonic(_("Power _Down"));
-    //gtk_menu_shell_append(GTK_POPOVER_MENU(machine_menu), s->powerdown_item);
+    s->reset_item = gtk_menu_item_new_with_mnemonic(_("_Reset"));
+    gtk_menu_shell_append(GTK_MENU_SHELL(machine_menu), s->reset_item);
 
-    //separator = gtk_separator_menu_item_new();
-    //gtk_menu_shell_append(GTK_POPOVER_MENU(machine_menu), separator);
+    s->powerdown_item = gtk_menu_item_new_with_mnemonic(_("Power _Down"));
+    gtk_menu_shell_append(GTK_MENU_SHELL(machine_menu), s->powerdown_item);
 
-    //s->quit_item = gtk_button_new_with_mnemonic(_("_Quit"));
-    //gtk_button_set_accel_path(GTK_BUTTON(s->quit_item),
-    //                             "<QEMU>/Machine/Quit");
-    //gtk_accel_map_add_entry("<QEMU>/Machine/Quit",
-    //                        GDK_KEY_q, HOTKEY_MODIFIERS);
-    //gtk_menu_shell_append(GTK_POPOVER_MENU(machine_menu), s->quit_item);
+    separator = gtk_separator_menu_item_new();
+    gtk_menu_shell_append(GTK_MENU_SHELL(machine_menu), separator);
 
-    machine_menu = gtk_popover_menu_new_from_model(G_MENU_MODEL(model));
+    s->quit_item = gtk_menu_item_new_with_mnemonic(_("_Quit"));
+    gtk_menu_item_set_accel_path(GTK_MENU_ITEM(s->quit_item),
+                                 "<QEMU>/Machine/Quit");
+    gtk_accel_map_add_entry("<QEMU>/Machine/Quit",
+                            GDK_KEY_q, HOTKEY_MODIFIERS);
+    gtk_menu_shell_append(GTK_MENU_SHELL(machine_menu), s->quit_item);
+
     return machine_menu;
 }
 
@@ -2021,9 +1953,9 @@ static void gl_area_realize(GtkGLArea *area, VirtualConsole *vc)
 }
 #endif
 
-static GList *gd_vc_gfx_init(GtkDisplayState *s, VirtualConsole *vc,
+static GSList *gd_vc_gfx_init(GtkDisplayState *s, VirtualConsole *vc,
                               QemuConsole *con, int idx,
-                              GList *group, GtkWidget *view_menu)
+                              GSList *group, GtkWidget *view_menu)
 {
     bool zoom_to_fit = false;
 
@@ -2050,7 +1982,7 @@ static GList *gd_vc_gfx_init(GtkDisplayState *s, VirtualConsole *vc,
              */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-            //gtk_widget_set_double_buffered(vc->gfx.drawing_area, FALSE);
+            gtk_widget_set_double_buffered(vc->gfx.drawing_area, FALSE);
 #pragma GCC diagnostic pop
             vc->gfx.dcl.ops = &dcl_egl_ops;
             vc->gfx.has_dmabuf = qemu_egl_has_dmabuf();
@@ -2066,22 +1998,16 @@ static GList *gd_vc_gfx_init(GtkDisplayState *s, VirtualConsole *vc,
     }
 
 
-    // TODO figure out controllers for the various mask below
-    GtkEventController* motion = gtk_event_controller_motion_new();
-    gtk_widget_add_controller(
-        vc->gfx.drawing_area,
-        motion
-    );
-    //gtk_widget_add_events(vc->gfx.drawing_area,
-    //                      GDK_POINTER_MOTION_MASK |
-    //                      GDK_BUTTON_PRESS_MASK |
-    //                      GDK_BUTTON_RELEASE_MASK |
-    //                      GDK_BUTTON_MOTION_MASK |
-    //                      GDK_ENTER_NOTIFY_MASK |
-    //                      GDK_LEAVE_NOTIFY_MASK |
-    //                      GDK_SCROLL_MASK |
-    //                      GDK_SMOOTH_SCROLL_MASK |
-    //                      GDK_KEY_PRESS_MASK);
+    gtk_widget_add_events(vc->gfx.drawing_area,
+                          GDK_POINTER_MOTION_MASK |
+                          GDK_BUTTON_PRESS_MASK |
+                          GDK_BUTTON_RELEASE_MASK |
+                          GDK_BUTTON_MOTION_MASK |
+                          GDK_ENTER_NOTIFY_MASK |
+                          GDK_LEAVE_NOTIFY_MASK |
+                          GDK_SCROLL_MASK |
+                          GDK_SMOOTH_SCROLL_MASK |
+                          GDK_KEY_PRESS_MASK);
     gtk_widget_set_can_focus(vc->gfx.drawing_area, TRUE);
 
     vc->type = GD_VC_GFX;
@@ -2105,7 +2031,7 @@ static GList *gd_vc_gfx_init(GtkDisplayState *s, VirtualConsole *vc,
         zoom_to_fit = s->opts->u.gtk.zoom_to_fit;
     }
     if (zoom_to_fit) {
-        gtk_check_button_set_active(GTK_CHECK_BUTTON(s->zoom_fit_item), true);
+        gtk_menu_item_activate(GTK_MENU_ITEM(s->zoom_fit_item));
         s->free_scale = true;
     }
 
@@ -2114,80 +2040,73 @@ static GList *gd_vc_gfx_init(GtkDisplayState *s, VirtualConsole *vc,
 
 static GtkWidget *gd_create_menu_view(GtkDisplayState *s)
 {
-    GList *group = NULL;
+    GSList *group = NULL;
     GtkWidget *view_menu;
     GtkWidget *separator;
     QemuConsole *con;
     int vc;
 
-    GMenu* menu_model = g_menu_new();
-    GMenuItem* fullscreen_item = g_menu_item_new("Fullscreen", NULL);
-    g_menu_append_item(menu_model, fullscreen_item);
+    view_menu = gtk_menu_new();
+    gtk_menu_set_accel_group(GTK_MENU(view_menu), s->accel_group);
 
-    view_menu = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu_model));
-    gtk_widget_add_controller(view_menu, s->shortcut_controller);
-
-    s->full_screen_item = gtk_check_button_new_with_mnemonic(_("_Fullscreen"));
+    s->full_screen_item = gtk_menu_item_new_with_mnemonic(_("_Fullscreen"));
 
 #if defined(CONFIG_VTE)
-    s->copy_item = gtk_button_new_with_mnemonic(_("_Copy"));
-    gtk_menu_shell_append(GTK_POPOVER_MENU(view_menu), s->copy_item);
+    s->copy_item = gtk_menu_item_new_with_mnemonic(_("_Copy"));
+    gtk_menu_shell_append(GTK_MENU_SHELL(view_menu), s->copy_item);
 #endif
 
+    gtk_accel_group_connect(s->accel_group, GDK_KEY_f, HOTKEY_MODIFIERS, 0,
+            g_cclosure_new_swap(G_CALLBACK(gd_accel_full_screen), s, NULL));
+    gtk_accel_label_set_accel(
+            GTK_ACCEL_LABEL(gtk_bin_get_child(GTK_BIN(s->full_screen_item))),
+            GDK_KEY_f, HOTKEY_MODIFIERS);
+    gtk_menu_shell_append(GTK_MENU_SHELL(view_menu), s->full_screen_item);
 
-    GtkShortcutTrigger* trigger = gtk_keyval_trigger_new(GDK_KEY_f, HOTKEY_MODIFIERS);
-    GtkShortcutAction* action = gtk_callback_action_new((GtkShortcutFunc)gd_accel_full_screen, s, NULL);
-    GtkShortcut* shortcut = gtk_shortcut_new(trigger, action);
-    gtk_shortcut_controller_add_shortcut(GTK_SHORTCUT_CONTROLLER(s->shortcut_controller), shortcut);
-    
-    GtkShortcutLabel *shortcut_label = gtk_shortcut_label_new("f");
-    gtk_button_set_child(GTK_BUTTON(s->full_screen_item), shortcut_label);
-    gtk_popover_menu_add_child(GTK_POPOVER_MENU(view_menu), s->full_screen_item, "Fullscreen");
+    separator = gtk_separator_menu_item_new();
+    gtk_menu_shell_append(GTK_MENU_SHELL(view_menu), separator);
 
-    separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
-    //gtk_popover_menu_add_child(GTK_POPOVER_MENU(view_menu), separator, NULL);
+    s->zoom_in_item = gtk_menu_item_new_with_mnemonic(_("Zoom _In"));
+    gtk_menu_item_set_accel_path(GTK_MENU_ITEM(s->zoom_in_item),
+                                 "<QEMU>/View/Zoom In");
+    gtk_accel_map_add_entry("<QEMU>/View/Zoom In", GDK_KEY_plus,
+                            HOTKEY_MODIFIERS);
+    gtk_accel_group_connect(s->accel_group, GDK_KEY_equal, HOTKEY_MODIFIERS, 0,
+            g_cclosure_new_swap(G_CALLBACK(gd_accel_zoom_in), s, NULL));
+    gtk_menu_shell_append(GTK_MENU_SHELL(view_menu), s->zoom_in_item);
 
-    s->zoom_in_item = gtk_check_button_new_with_mnemonic(_("Zoom _In"));
-    //gtk_button_set_accel_path(GTK_BUTTON(s->zoom_in_item),
-    //                             "<QEMU>/View/Zoom In");
-    //gtk_accel_map_add_entry("<QEMU>/View/Zoom In", GDK_KEY_plus,
-    //                        HOTKEY_MODIFIERS);
-    //gtk_shortcut_controller_connect(s->shortcut_controller, GDK_KEY_equal, HOTKEY_MODIFIERS, 0,
-    //        g_cclosure_new_swap(G_CALLBACK(gd_accel_zoom_in), s, NULL));
-    //gtk_menu_shell_append(GTK_POPOVER_MENU(view_menu), s->zoom_in_item);
+    s->zoom_out_item = gtk_menu_item_new_with_mnemonic(_("Zoom _Out"));
+    gtk_menu_item_set_accel_path(GTK_MENU_ITEM(s->zoom_out_item),
+                                 "<QEMU>/View/Zoom Out");
+    gtk_accel_map_add_entry("<QEMU>/View/Zoom Out", GDK_KEY_minus,
+                            HOTKEY_MODIFIERS);
+    gtk_menu_shell_append(GTK_MENU_SHELL(view_menu), s->zoom_out_item);
 
-    //s->zoom_out_item = gtk_button_new_with_mnemonic(_("Zoom _Out"));
-    //gtk_button_set_accel_path(GTK_BUTTON(s->zoom_out_item),
-    //                             "<QEMU>/View/Zoom Out");
-    //gtk_accel_map_add_entry("<QEMU>/View/Zoom Out", GDK_KEY_minus,
-    //                        HOTKEY_MODIFIERS);
-    //gtk_menu_shell_append(GTK_POPOVER_MENU(view_menu), s->zoom_out_item);
+    s->zoom_fixed_item = gtk_menu_item_new_with_mnemonic(_("Best _Fit"));
+    gtk_menu_item_set_accel_path(GTK_MENU_ITEM(s->zoom_fixed_item),
+                                 "<QEMU>/View/Zoom Fixed");
+    gtk_accel_map_add_entry("<QEMU>/View/Zoom Fixed", GDK_KEY_0,
+                            HOTKEY_MODIFIERS);
+    gtk_menu_shell_append(GTK_MENU_SHELL(view_menu), s->zoom_fixed_item);
 
-    //s->zoom_fixed_item = gtk_button_new_with_mnemonic(_("Best _Fit"));
-    //gtk_button_set_accel_path(GTK_BUTTON(s->zoom_fixed_item),
-    //                             "<QEMU>/View/Zoom Fixed");
-    //gtk_accel_map_add_entry("<QEMU>/View/Zoom Fixed", GDK_KEY_0,
-    //                        HOTKEY_MODIFIERS);
-    //gtk_menu_shell_append(GTK_POPOVER_MENU(view_menu), s->zoom_fixed_item);
+    s->zoom_fit_item = gtk_check_menu_item_new_with_mnemonic(_("Zoom To _Fit"));
+    gtk_menu_shell_append(GTK_MENU_SHELL(view_menu), s->zoom_fit_item);
 
-    s->zoom_fit_item = gtk_check_button_new_with_mnemonic(_("Zoom To _Fit"));
-    //gtk_menu_shell_append(GTK_POPOVER_MENU(view_menu), s->zoom_fit_item);
+    separator = gtk_separator_menu_item_new();
+    gtk_menu_shell_append(GTK_MENU_SHELL(view_menu), separator);
 
-    separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
-    //gtk_popover_menu_add_child(GTK_POPOVER_MENU(view_menu), separator, NULL);
+    s->grab_on_hover_item = gtk_check_menu_item_new_with_mnemonic(_("Grab On _Hover"));
+    gtk_menu_shell_append(GTK_MENU_SHELL(view_menu), s->grab_on_hover_item);
 
-    //s->grab_on_hover_item = gtk_check_button_new_with_mnemonic(_("Grab On _Hover"));
-    //gtk_menu_shell_append(GTK_POPOVER_MENU(view_menu), s->grab_on_hover_item);
-//
-    //s->grab_item = gtk_check_button_new_with_mnemonic(_("_Grab Input"));
-    //gtk_button_set_accel_path(GTK_BUTTON(s->grab_item),
-    //                             "<QEMU>/View/Grab Input");
-    //gtk_accel_map_add_entry("<QEMU>/View/Grab Input", GDK_KEY_g,
-    //                        HOTKEY_MODIFIERS);
-    //gtk_menu_shell_append(GTK_POPOVER_MENU(view_menu), s->grab_item);
+    s->grab_item = gtk_check_menu_item_new_with_mnemonic(_("_Grab Input"));
+    gtk_menu_item_set_accel_path(GTK_MENU_ITEM(s->grab_item),
+                                 "<QEMU>/View/Grab Input");
+    gtk_accel_map_add_entry("<QEMU>/View/Grab Input", GDK_KEY_g,
+                            HOTKEY_MODIFIERS);
+    gtk_menu_shell_append(GTK_MENU_SHELL(view_menu), s->grab_item);
 
-    separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
-    //gtk_popover_menu_add_child(GTK_POPOVER_MENU(view_menu), separator, NULL);
+    separator = gtk_separator_menu_item_new();
+    gtk_menu_shell_append(GTK_MENU_SHELL(view_menu), separator);
 
     /* gfx */
     for (vc = 0;; vc++) {
@@ -2205,25 +2124,25 @@ static GtkWidget *gd_create_menu_view(GtkDisplayState *s)
     gd_vcs_init(s, group, view_menu);
 #endif
 
-    separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
-    //gtk_popover_menu_add_child(GTK_POPOVER_MENU(view_menu), separator, NULL);
+    separator = gtk_separator_menu_item_new();
+    gtk_menu_shell_append(GTK_MENU_SHELL(view_menu), separator);
 
-    //s->show_tabs_item = gtk_check_button_new_with_mnemonic(_("Show _Tabs"));
-    //gtk_menu_shell_append(GTK_POPOVER_MENU(view_menu), s->show_tabs_item);
-//
-    //s->untabify_item = gtk_button_new_with_mnemonic(_("Detach Tab"));
-    //gtk_menu_shell_append(GTK_POPOVER_MENU(view_menu), s->untabify_item);
-//
-    //s->show_menubar_item = gtk_check_button_new_with_mnemonic(
-    //        _("Show Menubar"));
-    //gtk_check_button_set_active(GTK_CHECK_BUTTON(s->show_menubar_item),
-    //                               TRUE);
-    //gtk_shortcut_controller_connect(s->shortcut_controller, GDK_KEY_m, HOTKEY_MODIFIERS, 0,
-    //        g_cclosure_new_swap(G_CALLBACK(gd_accel_show_menubar), s, NULL));
-    //gtk_accel_label_set_accel(
-    //        GTK_ACCEL_LABEL(gtk_bin_get_child(GTK_BUTTON(s->show_menubar_item))),
-    //        GDK_KEY_m, HOTKEY_MODIFIERS);
-    //gtk_menu_shell_append(GTK_POPOVER_MENU(view_menu), s->show_menubar_item);
+    s->show_tabs_item = gtk_check_menu_item_new_with_mnemonic(_("Show _Tabs"));
+    gtk_menu_shell_append(GTK_MENU_SHELL(view_menu), s->show_tabs_item);
+
+    s->untabify_item = gtk_menu_item_new_with_mnemonic(_("Detach Tab"));
+    gtk_menu_shell_append(GTK_MENU_SHELL(view_menu), s->untabify_item);
+
+    s->show_menubar_item = gtk_check_menu_item_new_with_mnemonic(
+            _("Show Menubar"));
+    gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(s->show_menubar_item),
+                                   TRUE);
+    gtk_accel_group_connect(s->accel_group, GDK_KEY_m, HOTKEY_MODIFIERS, 0,
+            g_cclosure_new_swap(G_CALLBACK(gd_accel_show_menubar), s, NULL));
+    gtk_accel_label_set_accel(
+            GTK_ACCEL_LABEL(gtk_bin_get_child(GTK_BIN(s->show_menubar_item))),
+            GDK_KEY_m, HOTKEY_MODIFIERS);
+    gtk_menu_shell_append(GTK_MENU_SHELL(view_menu), s->show_menubar_item);
 
     return view_menu;
 }
@@ -2232,74 +2151,27 @@ static void gd_create_menus(GtkDisplayState *s)
 {
     GtkSettings *settings;
 
-    s->shortcut_controller = gtk_shortcut_controller_new(); // <- s->shortcut_controller = gtk_shortcut_controller_new();
-    //s->machine_menu = gd_create_menu_machine(s);
+    s->accel_group = gtk_accel_group_new();
+    s->machine_menu = gd_create_menu_machine(s);
     s->view_menu = gd_create_menu_view(s);
-//
-    //s->machine_menu_item = gtk_button_new_with_mnemonic(_("_Machine"));
-    //gtk_button_set_child(GTK_BUTTON(s->machine_menu_item),
-    //                          s->machine_menu);
-    ////gtk_popover_menu_bar_add_child(GTK_POPOVER_MENU_BAR(s->menu_bar), s->machine_menu_item, "machine");
-//
-    //s->view_menu_item = gtk_button_new_with_mnemonic(_("_View"));
-    //gtk_button_set_child(GTK_BUTTON(s->view_menu_item), s->view_menu);
-    //gtk_popover_menu_bar_add_child(GTK_POPOVER_MENU_BAR(s->menu_bar), s->view_menu_item, "view");
 
-    g_object_set_data(G_OBJECT(s->surface), "shortcut_controller", s->shortcut_controller);
-    gtk_widget_add_controller(s->window, s->shortcut_controller); // <- gtk_window_add_shortcut_controller(GTK_WINDOW(s->window), s->shortcut_controller);
+    s->machine_menu_item = gtk_menu_item_new_with_mnemonic(_("_Machine"));
+    gtk_menu_item_set_submenu(GTK_MENU_ITEM(s->machine_menu_item),
+                              s->machine_menu);
+    gtk_menu_shell_append(GTK_MENU_SHELL(s->menu_bar), s->machine_menu_item);
+
+    s->view_menu_item = gtk_menu_item_new_with_mnemonic(_("_View"));
+    gtk_menu_item_set_submenu(GTK_MENU_ITEM(s->view_menu_item), s->view_menu);
+    gtk_menu_shell_append(GTK_MENU_SHELL(s->menu_bar), s->view_menu_item);
+
+    g_object_set_data(G_OBJECT(s->window), "accel_group", s->accel_group);
+    gtk_window_add_accel_group(GTK_WINDOW(s->window), s->accel_group);
 
     /* Disable the default "F10" menu shortcut. */
-    // TODO how do we disable this shortcut, do we want to? Deprecated?
-    //settings = gtk_widget_get_settings(s->window);
-    //g_object_set(G_OBJECT(settings), "gtk-menu-bar-accel", "", NULL);
+    settings = gtk_widget_get_settings(s->window);
+    g_object_set(G_OBJECT(settings), "gtk-menu-bar-accel", "", NULL);
 }
 
-
-static GMenu *gd_create_machine_menu_model(GtkDisplayState *s) {
-    GMenu *machine_menu = g_menu_new();
-
-    GMenu* first = g_menu_new();
-    GMenuItem* pause_item = g_menu_item_new(_("_Pause"), "machine.pause");
-    g_menu_append_item(first, pause_item);
-    g_object_unref(pause_item);
-
-    GMenu* second = g_menu_new();
-
-    GMenuItem *reset_item = g_menu_item_new(_("_Reset"), "machine.reset");
-    g_menu_append_item(second, reset_item);
-    g_object_unref(reset_item);
-
-    GMenuItem *powerdown_item = g_menu_item_new(_("Power _Down"), "machine.powerdown");
-    g_menu_append_item(second, powerdown_item);
-    g_object_unref(powerdown_item);
-
-    GMenu* third = g_menu_new();
-
-    GMenuItem *quit_item = g_menu_item_new(_("_Quit"), "machine.quit");
-    g_menu_item_set_attribute_value(quit_item, "accel", g_variant_new_string("<Ctrl><Alt>Q"));
-    g_menu_append_item(third, quit_item);
-    g_object_unref(quit_item);
-
-    g_menu_append_section(machine_menu, NULL, first);
-    g_menu_append_section(machine_menu, NULL, second);
-    g_menu_append_section(machine_menu, NULL, third);
-
-    g_object_unref(first);
-    g_object_unref(second);
-    g_object_unref(third);
-
-    return machine_menu;
-}
-
-static GMenu *gd_create_view_menu_model(GtkDisplayState *s) {
-    GMenu *view_menu = g_menu_new();
-
-    GMenuItem* fullscreen_item = g_menu_item_new(_("_Fullscreen"), "view.fullscreen");
-    g_menu_append_item(view_menu, fullscreen_item);
-    g_object_unref(fullscreen_item);
-
-    return view_menu;
-}
 
 static gboolean gtkinit;
 
@@ -2310,7 +2182,7 @@ static void gtk_display_init(DisplayState *ds, DisplayOptions *opts)
     GtkDisplayState *s = g_malloc0(sizeof(*s));
     GdkDisplay *window_display;
     GtkIconTheme *theme;
-    char *dir[2] = {NULL, NULL};
+    char *dir;
 
     if (!gtkinit) {
         fprintf(stderr, "gtk initialization failed\n");
@@ -2319,44 +2191,16 @@ static void gtk_display_init(DisplayState *ds, DisplayOptions *opts)
     assert(opts->type == DISPLAY_TYPE_GTK);
     s->opts = opts;
 
-    theme = gtk_icon_theme_new();
-    dir[0] = get_relocated_path(CONFIG_QEMU_ICONDIR);
-    gtk_icon_theme_set_search_path(theme, (const char* const*)dir);
-    g_free(dir[0]);
+    theme = gtk_icon_theme_get_default();
+    dir = get_relocated_path(CONFIG_QEMU_ICONDIR);
+    gtk_icon_theme_prepend_search_path(theme, dir);
+    g_free(dir);
     g_set_prgname("qemu");
 
-    s->window = gtk_window_new();
-    window_display = gtk_widget_get_display(s->window);
-    s->surface = gdk_surface_new_toplevel(window_display);
+    s->window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     s->vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     s->notebook = gtk_notebook_new();
-
-    // Describe actions first
-    gd_connect_signals(s);
-
-    // TODO: menu bar not needed if we use the headerbar
-    //s->menu_bar = gtk_popover_menu_bar_new_from_model(G_MENU_MODEL(menu_model));
-    //gtk_widget_insert_action_group(s->menu_bar, "view", s->view_actions);
-    
-    GtkWidget *titlebar = gtk_header_bar_new();
-
-    GtkButton *machine_button = gtk_menu_button_new();
-    gtk_menu_button_set_icon_name(machine_button, "applications-system");
-    GMenu* machine_menu_model = gd_create_machine_menu_model(s);
-    gtk_menu_button_set_menu_model(GTK_BUTTON(machine_button), machine_menu_model);
-    g_object_unref(machine_menu_model);
-    gtk_widget_insert_action_group(machine_button, "machine", s->machine_actions);
-    gtk_header_bar_pack_end(GTK_HEADER_BAR(titlebar), machine_button);
-
-    GtkButton *view_button = gtk_menu_button_new();
-    gtk_menu_button_set_icon_name(view_button, "applications-graphics");
-    GMenu* view_menu_model = gd_create_view_menu_model(s);
-    gtk_menu_button_set_menu_model(GTK_BUTTON(view_button), view_menu_model);
-    g_object_unref(view_menu_model);
-    gtk_widget_insert_action_group(view_button, "view", s->view_actions);
-    gtk_header_bar_pack_end(GTK_HEADER_BAR(titlebar), view_button);
-
-    gtk_window_set_titlebar(GTK_WINDOW(s->window), titlebar);
+    s->menu_bar = gtk_menu_bar_new();
 
     s->free_scale = FALSE;
 
@@ -2366,16 +2210,18 @@ static void gtk_display_init(DisplayState *ds, DisplayOptions *opts)
      * sure that we don't accidentally break implicit assumptions.  */
     setlocale(LC_MESSAGES, "");
     setlocale(LC_CTYPE, "C.UTF-8");
-    dir[0] = get_relocated_path(CONFIG_QEMU_LOCALEDIR);
-    bindtextdomain("qemu", (const char* ) dir[0]);
-    g_free(dir[0]);
+    dir = get_relocated_path(CONFIG_QEMU_LOCALEDIR);
+    bindtextdomain("qemu", dir);
+    g_free(dir);
     bind_textdomain_codeset("qemu", "UTF-8");
     textdomain("qemu");
 
+    window_display = gtk_widget_get_display(s->window);
     if (s->opts->has_show_cursor && s->opts->show_cursor) {
         s->null_cursor = NULL; /* default pointer */
     } else {
-        s->null_cursor = NULL;//gdk_cursor_new_from_texture(NULL, 0, 0, NULL);
+        s->null_cursor = gdk_cursor_new_for_display(window_display,
+                                                    GDK_BLANK_CURSOR);
     }
 
     s->mouse_mode_notifier.notify = gd_mouse_mode_change;
@@ -2386,22 +2232,19 @@ static void gtk_display_init(DisplayState *ds, DisplayOptions *opts)
 
     gd_create_menus(s);
 
-    //gd_connect_signals(s); // moved up
+    gd_connect_signals(s);
 
     gtk_notebook_set_show_tabs(GTK_NOTEBOOK(s->notebook), FALSE);
     gtk_notebook_set_show_border(GTK_NOTEBOOK(s->notebook), FALSE);
 
     gd_update_caption(s);
 
-    // TODO what do they do?
-    //gtk_box_append(GTK_BOX(s->vbox), s->menu_bar);
-    gtk_box_append(GTK_BOX(s->vbox), s->notebook);
-    //gtk_box_pack_start(GTK_BOX(s->vbox), s->menu_bar, FALSE, TRUE, 0);
-    //gtk_box_pack_start(GTK_BOX(s->vbox), s->notebook, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(s->vbox), s->menu_bar, FALSE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(s->vbox), s->notebook, TRUE, TRUE, 0);
 
-    gtk_window_set_child(GTK_WINDOW(s->window), s->vbox); //<- gtk_container_add(GTK_CONTAINER(s->window), s->vbox);
+    gtk_container_add(GTK_CONTAINER(s->window), s->vbox);
 
-    gtk_widget_show(s->window);
+    gtk_widget_show_all(s->window);
 
     vc = gd_vc_find_current(s);
     gtk_widget_set_sensitive(s->view_menu, vc != NULL);
@@ -2412,11 +2255,11 @@ static void gtk_display_init(DisplayState *ds, DisplayOptions *opts)
 
     if (opts->has_full_screen &&
         opts->full_screen) {
-        //gtk_button_activate(GTK_BUTTON(s->full_screen_item));
+        gtk_menu_item_activate(GTK_MENU_ITEM(s->full_screen_item));
     }
     if (opts->u.gtk.has_grab_on_hover &&
         opts->u.gtk.grab_on_hover) {
-        //gtk_button_activate(GTK_BUTTON(s->grab_on_hover_item));
+        gtk_menu_item_activate(GTK_MENU_ITEM(s->grab_on_hover_item));
     }
     gd_clipboard_init(s);
 }
@@ -2441,7 +2284,7 @@ static void early_gtk_display_init(DisplayOptions *opts)
      * messages leaving everything else untouched.
      */
     gtk_disable_setlocale();
-    gtkinit = gtk_init_check();
+    gtkinit = gtk_init_check(NULL, NULL);
     if (!gtkinit) {
         /* don't exit yet, that'll break -help */
         return;
@@ -2472,7 +2315,7 @@ static void early_gtk_display_init(DisplayOptions *opts)
 #endif
 }
 
-static QemuDisplay qemu_display_gtk = {
+static QemuDisplay qemu_display_gtk_vk = {
     .type       = DISPLAY_TYPE_GTK,
     .early_init = early_gtk_display_init,
     .init       = gtk_display_init,
@@ -2480,7 +2323,7 @@ static QemuDisplay qemu_display_gtk = {
 
 static void register_gtk(void)
 {
-    qemu_display_register(&qemu_display_gtk);
+    qemu_display_register(&qemu_display_gtk_vk);
 }
 
 type_init(register_gtk);

@@ -143,13 +143,15 @@ QEMUGLContext gd_gl_area_create_context(DisplayChangeListener *dcl,
                                         QEMUGLParams *params)
 {
     VirtualConsole *vc = container_of(dcl, VirtualConsole, gfx.dcl);
-    GdkWindow *window;
+    GtkNative* native;
+    GdkSurface *surface;
     GdkGLContext *ctx;
     GError *err = NULL;
 
     gtk_gl_area_make_current(GTK_GL_AREA(vc->gfx.drawing_area));
-    window = gtk_widget_get_window(vc->gfx.drawing_area);
-    ctx = gdk_window_create_gl_context(window, &err);
+    native = gtk_widget_get_native(vc->gfx.drawing_area);
+    surface = gtk_native_get_surface(native);
+    ctx = gdk_surface_create_gl_context(surface, &err);
     if (err) {
         g_printerr("Create gdk gl context failed: %s\n", err->message);
         g_error_free(err);

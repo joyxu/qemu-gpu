@@ -78,6 +78,12 @@ if gtk.found()
   gtk_ss.add(when: [opengl, 'CONFIG_OPENGL'], if_true: files('gtk-gl-area.c'))
   gtk_ss.add(when: [x11, opengl, 'CONFIG_OPENGL'], if_true: files('gtk-egl.c'))
   ui_modules += {'gtk' : gtk_ss}
+
+#  if config_host.has_key('CONFIG_VULKAN')
+#    gtk_vk_ss = ss.source_set()
+#    gtk_vk_ss.add(when: [vulkan, 'CONFIG_VULKAN'], if_true: files('gtk-vk.c'))
+#    ui_modules += {'gtk-vk' : gtk_vk_ss}
+#  endif
 endif
 
 if sdl.found()

@@ -10,12 +10,12 @@
 #include <gdk/gdkkeysyms.h>
 
 #ifdef GDK_WINDOWING_X11
-#include <gdk/gdkx.h>
+#include <gdk/x11/gdkx.h>
 #include <X11/XKBlib.h>
 #endif
 
 #ifdef GDK_WINDOWING_WAYLAND
-#include <gdk/gdkwayland.h>
+#include <gdk/wayland/gdkwayland.h>
 #endif
 
 #include "ui/clipboard.h"
@@ -75,6 +75,7 @@ typedef struct VirtualConsole {
     GtkDisplayState *s;
     char *label;
     GtkWidget *window;
+    GtkWidget *surface;
     GtkWidget *menu_item;
     GtkWidget *tab_item;
     GtkWidget *focus;
@@ -89,10 +90,16 @@ typedef struct VirtualConsole {
 
 struct GtkDisplayState {
     GtkWidget *window;
+    GdkSurface *surface;
 
     GtkWidget *menu_bar;
 
-    GtkAccelGroup *accel_group;
+    GtkEventController *shortcut_controller; //  <- GtkAccelGroup void *accel_group;
+
+    GVariant *pause_state;
+
+    GSimpleActionGroup *machine_actions;
+    GSimpleActionGroup *view_actions;
 
     GtkWidget *machine_menu_item;
     GtkWidget *machine_menu;
@@ -141,7 +148,7 @@ struct GtkDisplayState {
     QemuClipboardPeer cbpeer;
     QemuClipboardInfo *cbinfo[QEMU_CLIPBOARD_SELECTION__COUNT];
     uint32_t cbpending[QEMU_CLIPBOARD_SELECTION__COUNT];
-    GtkClipboard *gtkcb[QEMU_CLIPBOARD_SELECTION__COUNT];
+    GdkClipboard *gdkcb[QEMU_CLIPBOARD_SELECTION__COUNT];
     bool cbowner[QEMU_CLIPBOARD_SELECTION__COUNT];
 
     DisplayOptions *opts;

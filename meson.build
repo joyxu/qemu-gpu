@@ -837,12 +837,12 @@ endif
 gtk = not_found
 gtkx11 = not_found
 if not get_option('gtk').auto() or (have_system and not cocoa.found())
-  gtk = dependency('gtk+-3.0', version: '>=3.22.0',
+  gtk = dependency('gtk4', version: '>=4.0.0',
                    method: 'pkg-config',
                    required: get_option('gtk'),
                    kwargs: static_kwargs)
   if gtk.found()
-    gtkx11 = dependency('gtk+-x11-3.0', version: '>=3.22.0',
+    gtkx11 = dependency('gtk4-x11', version: '>=4.0.0',
                         method: 'pkg-config',
                         required: false,
                         kwargs: static_kwargs)

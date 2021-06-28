@@ -25,20 +25,20 @@
 #include "ui/gtk.h"
 
 static QemuClipboardSelection gd_find_selection(GtkDisplayState *gd,
-                                                GtkClipboard *clipboard)
+                                                GdkClipboard *clipboard)
 {
     QemuClipboardSelection s;
 
     for (s = 0; s < QEMU_CLIPBOARD_SELECTION__COUNT; s++) {
-        if (gd->gtkcb[s] == clipboard) {
+        if (gd->gdkcb[s] == clipboard) {
             return s;
         }
     }
     return QEMU_CLIPBOARD_SELECTION_CLIPBOARD;
 }
 
-static void gd_clipboard_get_data(GtkClipboard     *clipboard,
-                                  GtkSelectionData *selection_data,
+static void gd_clipboard_get_data(GdkClipboard     *clipboard,
+                                  GtkSelectionModel *selection_data,
                                   guint             selection_info,
                                   gpointer          data)
 {
@@ -55,9 +55,10 @@ static void gd_clipboard_get_data(GtkClipboard     *clipboard,
     }
 
     if (info == gd->cbinfo[s] && gd->cbowner[s]) {
-        gtk_selection_data_set_text(selection_data,
-                                    info->types[type].data,
-                                    info->types[type].size);
+        // TODO how do we set text here?
+        //gtk_selection_data_set_text(selection_data,
+        //                            info->types[type].data,
+        //                            info->types[type].size);
     } else {
         /* clipboard owner changed while waiting for the data */
     }
@@ -65,7 +66,7 @@ static void gd_clipboard_get_data(GtkClipboard     *clipboard,
     qemu_clipboard_info_unref(info);
 }
 
-static void gd_clipboard_clear(GtkClipboard *clipboard,
+static void gd_clipboard_clear(GdkClipboard *clipboard,
                                gpointer data)
 {
     GtkDisplayState *gd = data;
@@ -86,26 +87,27 @@ static void gd_clipboard_notify(Notifier *notifier, void *data)
         gd->cbinfo[s] = qemu_clipboard_info_ref(info);
         gd->cbpending[s] = 0;
         if (!self_update) {
-            GtkTargetList *list;
-            GtkTargetEntry *targets;
+           // TODO targets?
+           // GtkTargetList *list;
+            // GtkTargetEntry *targets;
             gint n_targets;
 
-            list = gtk_target_list_new(NULL, 0);
-            if (info->types[QEMU_CLIPBOARD_TYPE_TEXT].available) {
-                gtk_target_list_add_text_targets(list, 0);
-            }
-            targets = gtk_target_table_new_from_list(list, &n_targets);
+           // list = gtk_target_list_new(NULL, 0);
+           // if (info->types[QEMU_CLIPBOARD_TYPE_TEXT].available) {
+           //     gtk_target_list_add_text_targets(list, 0);
+           // }
+           // targets = gtk_target_table_new_from_list(list, &n_targets);
 
-            gtk_clipboard_clear(gd->gtkcb[s]);
+            gdk_clipboard_set_text(gd->gdkcb[s], NULL);
             gd->cbowner[s] = true;
-            gtk_clipboard_set_with_data(gd->gtkcb[s],
-                                        targets, n_targets,
-                                        gd_clipboard_get_data,
-                                        gd_clipboard_clear,
-                                        gd);
+            //gdk_clipboard_set_with_data(gd->gtkcb[s],
+            //                            targets, n_targets,
+            //                            gd_clipboard_get_data,
+            //                            gd_clipboard_clear,
+            //                            gd);
 
-            gtk_target_table_free(targets, n_targets);
-            gtk_target_list_unref(list);
+            //gtk_target_table_free(targets, n_targets);
+            //gtk_target_list_unref(list);
         }
         return;
     }
@@ -128,7 +130,7 @@ static void gd_clipboard_request(QemuClipboardInfo *info,
 
     switch (type) {
     case QEMU_CLIPBOARD_TYPE_TEXT:
-        text = gtk_clipboard_wait_for_text(gd->gtkcb[info->selection]);
+        text = gdk_clipboard_read_text_finish(gd->gdkcb[info->selection], NULL, NULL);
         if (text) {
             qemu_clipboard_set_data(&gd->cbpeer, info, type,
                                     strlen(text), text, true);
@@ -140,7 +142,7 @@ static void gd_clipboard_request(QemuClipboardInfo *info,
     }
 }
 
-static void gd_owner_change(GtkClipboard *clipboard,
+static void gd_owner_change(GdkClipboard *clipboard,
                             GdkEvent *event,
                             gpointer data)
 {
@@ -154,10 +156,11 @@ static void gd_owner_change(GtkClipboard *clipboard,
     }
 
 
+/* TODO how to handle this?
     switch (event->owner_change.reason) {
     case GDK_SETTING_ACTION_NEW:
         info = qemu_clipboard_info_new(&gd->cbpeer, s);
-        if (gtk_clipboard_wait_is_text_available(clipboard)) {
+        if (gdk_clipboard_wait_is_text_available(clipboard)) {
             info->types[QEMU_CLIPBOARD_TYPE_TEXT].available = true;
         }
 
@@ -167,6 +170,7 @@ static void gd_owner_change(GtkClipboard *clipboard,
     default:
         break;
     }
+    */
 }
 
 void gd_clipboard_init(GtkDisplayState *gd)
@@ -176,17 +180,17 @@ void gd_clipboard_init(GtkDisplayState *gd)
     gd->cbpeer.request = gd_clipboard_request;
     qemu_clipboard_peer_register(&gd->cbpeer);
 
-    gd->gtkcb[QEMU_CLIPBOARD_SELECTION_CLIPBOARD] =
-        gtk_clipboard_get(gdk_atom_intern("CLIPBOARD", FALSE));
-    gd->gtkcb[QEMU_CLIPBOARD_SELECTION_PRIMARY] =
-        gtk_clipboard_get(gdk_atom_intern("PRIMARY", FALSE));
-    gd->gtkcb[QEMU_CLIPBOARD_SELECTION_SECONDARY] =
-        gtk_clipboard_get(gdk_atom_intern("SECONDARY", FALSE));
+    //gd->gdkcb[QEMU_CLIPBOARD_SELECTION_CLIPBOARD] =
+    //    gdk_clipboard_get(gdk_atom_intern("CLIPBOARD", FALSE));
+    //gd->gdkcb[QEMU_CLIPBOARD_SELECTION_PRIMARY] =
+    //    gdk_clipboard_get(gdk_atom_intern("PRIMARY", FALSE));
+    //gd->gdkcb[QEMU_CLIPBOARD_SELECTION_SECONDARY] =
+    //    gdk_clipboard_get(gdk_atom_intern("SECONDARY", FALSE));
 
-    g_signal_connect(gd->gtkcb[QEMU_CLIPBOARD_SELECTION_CLIPBOARD],
+    g_signal_connect(gd->gdkcb[QEMU_CLIPBOARD_SELECTION_CLIPBOARD],
                      "owner-change", G_CALLBACK(gd_owner_change), gd);
-    g_signal_connect(gd->gtkcb[QEMU_CLIPBOARD_SELECTION_PRIMARY],
+    g_signal_connect(gd->gdkcb[QEMU_CLIPBOARD_SELECTION_PRIMARY],
                      "owner-change", G_CALLBACK(gd_owner_change), gd);
-    g_signal_connect(gd->gtkcb[QEMU_CLIPBOARD_SELECTION_SECONDARY],
+    g_signal_connect(gd->gdkcb[QEMU_CLIPBOARD_SELECTION_SECONDARY],
                      "owner-change", G_CALLBACK(gd_owner_change), gd);
 }
