@@ -12,6 +12,10 @@
 # include "ui/shader.h"
 #endif
 
+#ifdef CONFIG_VULKAN
+# include <vulkan/vulkan_core.h>
+#endif
+
 /* keyboard/mouse support */
 
 #define MOUSE_EVENT_LBUTTON 0x01
@@ -152,6 +156,7 @@ void cursor_get_mono_image(QEMUCursor *c, int foreground, uint8_t *mask);
 void cursor_get_mono_mask(QEMUCursor *c, int transparent, uint8_t *mask);
 
 typedef void *QEMUGLContext;
+typedef VkInstance QEMUVulkanContext;
 typedef struct QEMUGLParams QEMUGLParams;
 
 struct QEMUGLParams {

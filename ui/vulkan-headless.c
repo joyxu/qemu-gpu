@@ -54,8 +54,8 @@ static void vk_scanout_disable(DisplayChangeListener *dcl)
 {
     vulkan_dpy *vdpy = container_of(dcl, vulkan_dpy, dcl);
 
-    vk_fb_destroy(vdpy->device, &vdpy->guest_fb);
-    vk_fb_destroy(vdpy->device, &vdpy->blit_fb);
+    vk_fb_destroy(&vdpy->guest_fb);
+    vk_fb_destroy(&vdpy->blit_fb);
 }
 
 static void vk_scanout_texture(DisplayChangeListener *dcl,
@@ -74,15 +74,15 @@ static void vk_scanout_texture(DisplayChangeListener *dcl,
     vulkan_texture texture = {};
 
     /* source framebuffer */
-    vk_fb_setup_for_tex(vdpy->device, &vdpy->guest_fb, texture);
+    vk_fb_setup_for_tex(&vdpy->guest_fb, texture);
 
     /* dest framebuffer */
     // TODO: is this the swapchain?
     if (vdpy->blit_fb.texture.width != backing_width ||
         vdpy->blit_fb.texture.height != backing_height)
     {
-        vk_fb_destroy(vdpy->device, &vdpy->blit_fb);
-        vk_fb_setup_new_tex(vdpy->device, &vdpy->blit_fb, backing_width, backing_height);
+        vk_fb_destroy(&vdpy->blit_fb);
+        vk_fb_setup_new_tex(&vdpy->blit_fb, backing_width, backing_height);
     }
 }
 #if 0
@@ -216,8 +216,8 @@ static void vk_headless_init(DisplayState *ds, DisplayOptions *opts)
         vdpy = g_new0(vulkan_dpy, 1);
         vdpy->dcl.con = con;
         vdpy->dcl.ops = &vulkan_ops;
-        vdpy->device = device;
-        vdpy->vks = qemu_vk_init_shader(device);
+        vdpy->device = device; // TODO different device for each display?
+        vdpy->vks = qemu_vk_init_shader(vdpy->device);
         register_displaychangelistener(&vdpy->dcl);
     }
 }

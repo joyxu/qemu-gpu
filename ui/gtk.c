@@ -624,6 +624,33 @@ static const DisplayChangeListenerOps dcl_egl_ops = {
 
 #endif /* CONFIG_OPENGL */
 
+#if defined(CONFIG_VULKAN)
+
+static const DisplayChangeListenerOps dcl_vk_ops = {
+    .dpy_name             = "gtk-vk",
+    .dpy_gfx_update       = gd_vk_update,
+    .dpy_gfx_switch       = gd_vk_switch,
+    //.dpy_gfx_check_format = console_vk_check_format,
+    .dpy_refresh          = gd_vk_refresh,
+    //.dpy_mouse_set        = vk_mouse_set,
+    //.dpy_cursor_define    = vk_cursor_define,
+
+    .dpy_gl_ctx_create       = gd_vk_create_context,
+    //.dpy_gl_ctx_destroy      = qemu_vk_destroy_context,
+    .dpy_gl_ctx_make_current = gd_vk_make_current,
+    .dpy_gl_scanout_disable  = gd_vk_scanout_disable,
+    .dpy_gl_scanout_texture  = gd_vk_scanout_texture,
+    .dpy_gl_scanout_dmabuf   = gd_vk_scanout_dmabuf,
+    .dpy_gl_cursor_dmabuf    = gd_vk_cursor_dmabuf,
+    .dpy_gl_cursor_position  = gd_vk_cursor_position,
+    .dpy_gl_release_dmabuf   = gd_vk_release_dmabuf,
+    .dpy_gl_update           = gd_vk_scanout_flush,
+    .dpy_has_dmabuf          = gd_has_dmabuf,
+};
+
+
+#endif /* CONFIG_VULKAN */
+
 /** QEMU Events **/
 
 static void gd_change_runstate(void *opaque, bool running, RunState state)
@@ -747,6 +774,13 @@ static gboolean gd_draw_event(GtkWidget *widget, cairo_t *cr, void *opaque)
             abort();
 #endif
         }
+    }
+#endif /* CONFIG_OPENGL */
+
+#if defined(CONFIG_VULKAN)
+    if (vc->gfx.vks) {
+        gd_vk_draw(vc);
+        return TRUE;
     }
 #endif
 
@@ -1998,6 +2032,14 @@ static GSList *gd_vc_gfx_init(GtkDisplayState *s, VirtualConsole *vc,
         }
     } else
 #endif
+#if defined(CONFIG_VULKAN)
+    if (display_vulkan) {
+        vc->gfx.drawing_area = gtk_drawing_area_new();
+        vc->gfx.dcl.ops = &dcl_vk_ops;
+        // TODO: needed?
+        //vc->gfx.has_dmabuf = qemu_vk_has_dmabuf();
+    } else
+#endif
     {
         vc->gfx.drawing_area = gtk_drawing_area_new();
         vc->gfx.dcl.ops = &dcl_ops;
@@ -2313,6 +2355,10 @@ static void early_gtk_display_init(DisplayOptions *opts)
         }
 #endif
     }
+
+#ifdef CONFIG_VULKAN
+    gtk_vk_init();
+#endif
 
     keycode_map = gd_get_keymap(&keycode_maplen);
 

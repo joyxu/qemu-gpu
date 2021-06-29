@@ -27,12 +27,11 @@
 
 #include "qemu/osdep.h"
 #include "ui/vulkan-shader.h"
+#include "ui/vulkan-helpers.h"
 
 #include "ui/shader/texture-blit-vert-spv.h"
 #include "ui/shader/texture-blit-flip-vert-spv.h"
 #include "ui/shader/texture-blit-frag-spv.h"
-
-#include <vulkan/vulkan.h>
 
 #include <glib.h>
 
@@ -349,7 +348,7 @@ QemuVkShader *qemu_vk_init_shader(VkDevice device)
     return vks;
 }
 
-void qemu_vk_fini_shader(VkDevice device, QemuVkShader *vks)
+void qemu_vk_fini_shader(QemuVkShader *vks)
 {
     if (!vks)
     {

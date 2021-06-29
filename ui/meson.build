@@ -65,7 +65,7 @@ endif
 if config_host.has_key('CONFIG_VULKAN')
   vulkan_headless_ss = ss.source_set()
   vulkan_headless_ss.add(when: [vulkan, 'CONFIG_VULKAN'],
-                         if_true: files('vulkan-helpers.c', 'vulkan-headless.c', 'vulkan-shader.c'))
+                         if_true: files('vulkan-helpers.c', 'vulkan-headless.c', 'vulkan-shader.c', 'vulkan-context.c'))
   ui_modules += {'vulkan-headless' : vulkan_headless_ss}
 endif
 
@@ -77,6 +77,7 @@ if gtk.found()
   gtk_ss.add(when: x11, if_true: files('x_keymap.c'))
   gtk_ss.add(when: [opengl, 'CONFIG_OPENGL'], if_true: files('gtk-gl-area.c'))
   gtk_ss.add(when: [x11, opengl, 'CONFIG_OPENGL'], if_true: files('gtk-egl.c'))
+  gtk_ss.add(when: [vulkan, 'CONFIG_VULKAN'], if_true: files('gtk-vk.c'))
   ui_modules += {'gtk' : gtk_ss}
 endif
 

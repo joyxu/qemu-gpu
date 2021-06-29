@@ -26,6 +26,11 @@
 #include "ui/egl-context.h"
 #endif
 
+#if defined(CONFIG_VULKAN)
+#include "ui/vulkan-helpers.h"
+#include "ui/vulkan-shader.h"
+#endif
+
 #define MAX_VCS 10
 
 typedef struct GtkDisplayState GtkDisplayState;
@@ -53,6 +58,13 @@ typedef struct VirtualGfxConsole {
     bool y0_top;
     bool scanout_mode;
     bool has_dmabuf;
+#endif
+#if defined(CONFIG_VULKAN)
+    VkInstance vk_instance;
+    VkDevice vk_device;
+    VkSurfaceKHR vk_surface;
+    QemuVkShader *vks;
+    vulkan_fb guest_vk_fb;
 #endif
 } VirtualGfxConsole;
 
@@ -217,4 +229,38 @@ int gd_gl_area_make_current(DisplayChangeListener *dcl,
 /* gtk-clipboard.c */
 void gd_clipboard_init(GtkDisplayState *gd);
 
+/* ui/gtk-vk.c */
+void gd_vk_init(VirtualConsole *vc);
+void gd_vk_draw(VirtualConsole *vc);
+void gd_vk_update(DisplayChangeListener *dcl,
+                   int x, int y, int w, int h);
+void gd_vk_refresh(DisplayChangeListener *dcl);
+void gd_vk_switch(DisplayChangeListener *dcl,
+                   DisplaySurface *surface);
+QEMUVulkanContext gd_vk_create_context(DisplayChangeListener *dcl,
+                                    QEMUGLParams *params);
+void gd_vk_scanout_disable(DisplayChangeListener *dcl);
+void gd_vk_scanout_texture(DisplayChangeListener *dcl,
+                            vulkan_texture backing_texture,
+                            bool backing_y_0_top,
+                            uint32_t backing_width,
+                            uint32_t backing_height,
+                            uint32_t x, uint32_t y,
+                            uint32_t w, uint32_t h);
+void gd_vk_scanout_dmabuf(DisplayChangeListener *dcl,
+                           QemuDmaBuf *dmabuf);
+void gd_vk_cursor_dmabuf(DisplayChangeListener *dcl,
+                          QemuDmaBuf *dmabuf, bool have_hot,
+                          uint32_t hot_x, uint32_t hot_y);
+void gd_vk_cursor_position(DisplayChangeListener *dcl,
+                            uint32_t pos_x, uint32_t pos_y);
+void gd_vk_release_dmabuf(DisplayChangeListener *dcl,
+                           QemuDmaBuf *dmabuf);
+void gd_vk_scanout_flush(DisplayChangeListener *dcl,
+                          uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+void gtk_vk_init(void);
+
+// TODO: not needed?
+int gd_vk_make_current(DisplayChangeListener *dcl,
+                        QEMUVulkanContext ctx);
 #endif /* UI_GTK_H */

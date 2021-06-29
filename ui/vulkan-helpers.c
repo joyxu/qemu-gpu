@@ -18,6 +18,8 @@
 #include "ui/vulkan-helpers.h"
 
 #include <glib.h>
+#include <vulkan/vulkan_wayland.h>
+#include <vulkan/vulkan_xlib.h>
 
 #define VK_CHECK(res) g_assert(res == VK_SUCCESS)
 
@@ -27,7 +29,7 @@ VkDevice device;
 
 /* -- */
 
-static void vk_texture_destroy(VkDevice device, vulkan_texture *texture)
+static void vk_texture_destroy(vulkan_texture *texture)
 {
     if (texture->delete_image)
     {
@@ -50,22 +52,22 @@ static void vk_texture_destroy(VkDevice device, vulkan_texture *texture)
     texture->height = 0;
 }
 
-void vk_fb_destroy(VkDevice device, vulkan_fb *fb)
+void vk_fb_destroy(vulkan_fb *fb)
 {
     if (fb->framebuffer == VK_NULL_HANDLE)
     {
         return;
     }
 
-    vk_texture_destroy(device, &fb->texture);
+    vk_texture_destroy(&fb->texture);
     vkDestroyFramebuffer(device, fb->framebuffer, NULL);
     fb->framebuffer = VK_NULL_HANDLE;
 }
 
-void vk_fb_setup_for_tex(VkDevice device, vulkan_fb *fb, vulkan_texture texture)
+void vk_fb_setup_for_tex(vulkan_fb *fb, vulkan_texture texture)
 {
     // Destroy previous texture and then set the new one
-    vk_texture_destroy(device, &fb->texture);
+    vk_texture_destroy(&fb->texture);
     fb->texture = texture;
 
     if (fb->framebuffer == VK_NULL_HANDLE)
@@ -84,7 +86,7 @@ void vk_fb_setup_for_tex(VkDevice device, vulkan_fb *fb, vulkan_texture texture)
     }
 }
 
-void vk_fb_setup_new_tex(VkDevice device, vulkan_fb *fb, int width, int height)
+void vk_fb_setup_new_tex(vulkan_fb *fb, int width, int height)
 {
     vulkan_texture texture = {
         .width = width,
@@ -129,7 +131,7 @@ void vk_fb_setup_new_tex(VkDevice device, vulkan_fb *fb, int width, int height)
 
     VK_CHECK(vkCreateImageView(device, &image_view_create_info, NULL, &texture.view));
 
-    vk_fb_setup_for_tex(device, fb, texture);
+    vk_fb_setup_for_tex(fb, texture);
 }
 
 /* -- */
@@ -148,21 +150,32 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_message_callback(
     return VK_FALSE;
 }
 
-VkDevice vk_init(void)
+VkInstance vk_create_instance(void)
 {
+    VkInstance instance = VK_NULL_HANDLE;
+
     VkApplicationInfo app_info = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-        .pApplicationName = "Qemu headless",
+        .pApplicationName = "Qemu",
         .pEngineName = "Qemu",
         .apiVersion = VK_API_VERSION_1_0,
+    };
+
+    const char* extension_names[] = {
+        VK_KHR_SURFACE_EXTENSION_NAME,
+        VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
+        VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
+        VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
     };
 
     VkInstanceCreateInfo instance_create_info = {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pApplicationInfo = &app_info,
+        .enabledExtensionCount = 3, // exclude debug report for the moment
+        .ppEnabledExtensionNames = extension_names,
     };
 
-    const char *validation_layers[] = {"VK_LAYER_KHRONOS_validation"};
+    const char *validation_layers[] = { "VK_LAYER_KHRONOS_validation"};
     uint32_t layer_count = 1;
 
     // Check layers availability
@@ -195,13 +208,12 @@ VkDevice vk_init(void)
     // TODO: remove and enable validation layers only on debug mode
     g_assert(layers_available);
 
-    const char *validation_ext = VK_EXT_DEBUG_REPORT_EXTENSION_NAME;
     if (layers_available)
     {
         instance_create_info.ppEnabledLayerNames = validation_layers;
         instance_create_info.enabledLayerCount = layer_count;
-        instance_create_info.ppEnabledExtensionNames = &validation_ext;
-        instance_create_info.enabledExtensionCount = 1;
+        // Extension name to be enabled is last one, so we just increase the count here
+        instance_create_info.enabledExtensionCount += 1;
     }
 
     VK_CHECK(vkCreateInstance(&instance_create_info, NULL, &instance));
@@ -225,7 +237,11 @@ VkDevice vk_init(void)
         VK_CHECK(vkCreateDebugReportCallbackEXT(instance, &debug_report_create_info, NULL, &debug_report_callback));
     }
 
-    // Create device
+    return instance;
+}
+
+static VkDevice vk_create_device(VkInstance instance)
+{
     uint32_t device_count = 0;
     VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, NULL));
     VkPhysicalDevice *physical_devices = g_new(VkPhysicalDevice, device_count);
@@ -233,7 +249,7 @@ VkDevice vk_init(void)
     VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, physical_devices));
 
     // TODO: select physical device based on user input
-    VkPhysicalDevice physical_device = physical_devices[1];
+    VkPhysicalDevice physical_device = physical_devices[0];
     g_free(physical_devices);
 
     VkPhysicalDeviceProperties device_properties;
@@ -267,7 +283,135 @@ VkDevice vk_init(void)
         .pQueueCreateInfos = &queue_create_info,
     };
 
+    VkDevice device = VK_NULL_HANDLE;
+
     VK_CHECK(vkCreateDevice(physical_device, &device_create_info, NULL, &device));
 
     return device;
+}
+
+// TODO: Split this function in multiple ones
+VkDevice vk_init(void)
+{
+    instance = vk_create_instance();
+    return vk_create_device(instance);
+
+}
+
+static VkSurfaceKHR vk_create_wayland_surface(struct wl_display* dpy, struct wl_surface* s)
+{
+    VkWaylandSurfaceCreateInfoKHR surface_create_info = {
+        .sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR,
+        .flags = 0,
+        .display = dpy,
+        .surface = s,
+    };
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+
+    VK_CHECK(vkCreateWaylandSurfaceKHR(instance, &surface_create_info, NULL, &surface));
+    return surface;
+}
+
+VkSurfaceKHR qemu_vk_init_surface_x11(VkInstance instance, Display* dpy, Window w)
+{
+    VkXlibSurfaceCreateInfoKHR surface_create_info = {
+        .sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR,
+        .flags = 0,
+        .dpy = dpy,
+        .window = w,
+    };
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+
+    VK_CHECK(vkCreateXlibSurfaceKHR(instance, &surface_create_info, NULL, &surface));
+    return surface;
+}
+
+static VkSurfaceKHR vk_create_x11_surface(Display *dpy, Window w)
+{
+    return qemu_vk_init_surface_x11(instance, dpy, w);
+}
+
+static int qemu_vk_init_dpy(VkDisplayKHR dpy,
+                             //EGLenum platform,
+                             int platform,
+                             VkDisplayModeKHR mode)
+{
+    /*
+    static const EGLint conf_att_core[] = {
+        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
+        EGL_RED_SIZE,   5,
+        EGL_GREEN_SIZE, 5,
+        EGL_BLUE_SIZE,  5,
+        EGL_ALPHA_SIZE, 0,
+        EGL_NONE,
+    };
+    static const EGLint conf_att_gles[] = {
+        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+        EGL_RED_SIZE,   5,
+        EGL_GREEN_SIZE, 5,
+        EGL_BLUE_SIZE,  5,
+        EGL_ALPHA_SIZE, 0,
+        EGL_NONE,
+    };
+    EGLint major, minor;
+    EGLBoolean b;
+    EGLint n;
+    bool gles = (mode == DISPLAYGL_MODE_ES);
+
+    qemu_egl_display = qemu_egl_get_display(dpy, platform);
+    if (qemu_egl_display == EGL_NO_DISPLAY) {
+        error_report("egl: eglGetDisplay failed");
+        return -1;
+    }
+
+    b = eglInitialize(qemu_egl_display, &major, &minor);
+    if (b == EGL_FALSE) {
+        error_report("egl: eglInitialize failed");
+        return -1;
+    }
+
+    b = eglBindAPI(gles ?  EGL_OPENGL_ES_API : EGL_OPENGL_API);
+    if (b == EGL_FALSE) {
+        error_report("egl: eglBindAPI failed (%s mode)",
+                     gles ? "gles" : "core");
+        return -1;
+    }
+
+    b = eglChooseConfig(qemu_egl_display,
+                        gles ? conf_att_gles : conf_att_core,
+                        &qemu_egl_config, 1, &n);
+    if (b == EGL_FALSE || n != 1) {
+        error_report("egl: eglChooseConfig failed (%s mode)",
+                     gles ? "gles" : "core");
+        return -1;
+    }
+
+    qemu_egl_mode = gles ? DISPLAYGL_MODE_ES : DISPLAYGL_MODE_CORE;
+    return 0;
+    */
+}
+
+/// Initializes Vulkan for a wayland display
+int qemu_vk_init_dpy_wayland(struct wl_display *dpy, struct wl_surface *s)
+{
+    vk_init();
+    vk_create_wayland_surface(dpy, s);
+}
+
+/// Initializes Vulkan for an X11 display
+int qemu_vk_init_dpy_x11(Display *dpy, Window w) {
+    vk_init();
+    vk_create_x11_surface(dpy, w);
+}
+
+VkInstance qemu_vk_create_instance(void)
+{
+    return vk_create_instance();
+}
+
+VkDevice qemu_vk_create_device(VkInstance instance)
+{
+    return vk_create_device(instance);
 }
