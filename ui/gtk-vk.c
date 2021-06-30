@@ -58,9 +58,9 @@ void gd_vk_init(VirtualConsole *vc)
     Display *dpy = gdk_x11_display_get_xdisplay(gdk_display);
 
     vc->gfx.vk_instance = vk_create_instance();
-    vc->gfx.vk_physical_device = vk_create_physical_device(vc->gfx.vk_instance);
-    vc->gfx.vk_device = vk_create_device(vc->gfx.vk_instance, vc->gfx.vk_physical_device);
     vc->gfx.vk_surface = qemu_vk_init_surface_x11(vc->gfx.vk_instance, dpy, x11_window);
+    vc->gfx.vk_physical_device = vk_create_physical_device(vc->gfx.vk_instance, vc->gfx.vk_surface);
+    vc->gfx.vk_device = vk_create_device(vc->gfx.vk_instance, vc->gfx.vk_physical_device);
     vc->gfx.vk_swapchain = vk_create_swapchain(vc->gfx.vk_physical_device, vc->gfx.vk_device, vc->gfx.vk_surface);
 
     assert(vc->gfx.vk_surface);

@@ -256,18 +256,56 @@ VkInstance vk_create_instance(void)
     return instance;
 }
 
-VkPhysicalDevice vk_create_physical_device(VkInstance instance)
+static bool device_suitable(VkPhysicalDevice physical_device, VkSurfaceKHR surface)
+{
+    uint32_t queue_family_count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, NULL);
+
+    VkQueueFamilyProperties *queue_families = g_new(VkQueueFamilyProperties, queue_family_count);
+    vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_families);
+
+    // Find the graphics family
+    int32_t graphics_family_index = -1;
+    int32_t present_family_index = -1;
+
+    for (uint32_t i = 0; i < queue_family_count; ++i) {
+        if (queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            graphics_family_index = (int32_t)i;
+        }
+
+        VkBool32 present_support = false;
+        vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, i, surface, &present_support);
+        if (present_support) {
+            present_family_index = (int32_t)i;
+        }
+
+        if (graphics_family_index >= 0 && present_family_index >= 0) {
+            break;
+        }
+    }
+
+    g_free(queue_families);
+    return graphics_family_index >= 0 && present_family_index >= 0;
+}
+
+VkPhysicalDevice vk_create_physical_device(VkInstance instance, VkSurfaceKHR surface)
 {
     uint32_t device_count = 0;
     VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, NULL));
-    VkPhysicalDevice *physical_devices = g_new(VkPhysicalDevice, device_count);
 
+    VkPhysicalDevice *physical_devices = g_new(VkPhysicalDevice, device_count);
     VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, physical_devices));
 
-    // TODO: select physical device based on user input/other requirements
-    VkPhysicalDevice physical_device = physical_devices[0];
-    g_free(physical_devices);
+    VkPhysicalDevice physical_device = VK_NULL_HANDLE;
+    for (uint32_t i = 0; i < device_count; ++i) {
+        if (device_suitable(physical_devices[i], surface)) {
+            physical_device = physical_devices[i];
+            break;
+        }
+    }
 
+    g_free(physical_devices);
+    g_assert(physical_device != VK_NULL_HANDLE);
     return physical_device;
 }
 
@@ -321,7 +359,7 @@ VkDevice vk_create_device(VkInstance instance, VkPhysicalDevice physical_device)
 VkDevice vk_init(void)
 {
     VkInstance instance = vk_create_instance();
-    VkPhysicalDevice physical_device = vk_create_physical_device(instance);
+    VkPhysicalDevice physical_device = vk_create_physical_device(instance, VK_NULL_HANDLE);
     return vk_create_device(instance, physical_device);
 }
 
@@ -434,20 +472,18 @@ int qemu_vk_init_dpy_x11(Display *dpy, Window w)
     vk_create_x11_surface(instance, dpy, w);
 }
 
-static VkExtent2D get_swapchain_extent(VkPhysicalDevice physical_device, VkSurfaceKHR surface) {
-    VkSurfaceCapabilitiesKHR capabilities = {};
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, surface, &capabilities);
-    g_assert(capabilities.currentExtent.width != UINT32_MAX);
-    return capabilities.currentExtent;
+static VkExtent2D get_swapchain_extent(VkSurfaceCapabilitiesKHR *capabilities) {
+    g_assert(capabilities->currentExtent.width != UINT32_MAX);
+    return capabilities->currentExtent;
 }
 
 static VkSurfaceFormatKHR get_swapchain_format(VkPhysicalDevice physical_device, VkSurfaceKHR surface) {
 
     uint32_t format_count;
     VkSurfaceFormatKHR format = {};
-    VkSurfaceFormatKHR *formats = g_new(VkSurfaceFormatKHR, format_count);
-
     VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &format_count, NULL));
+
+    VkSurfaceFormatKHR *formats = g_new(VkSurfaceFormatKHR, format_count);
     VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &format_count, formats));
 
     for (uint32_t i = 0; i < format_count; ++i) {
@@ -465,9 +501,9 @@ static VkSurfaceFormatKHR get_swapchain_format(VkPhysicalDevice physical_device,
 static VkPresentModeKHR get_swapchain_present_mode(VkPhysicalDevice physical_device, VkSurfaceKHR surface) {
     uint32_t present_count;
     VkPresentModeKHR present_mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
-    VkPresentModeKHR *present_modes = g_new(VkPresentModeKHR, present_count);
-
     VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device, surface, &present_count, NULL));
+
+    VkPresentModeKHR *present_modes = g_new(VkPresentModeKHR, present_count);
     VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device, surface, &present_count, present_modes));
 
     for (uint32_t i = 0; i < present_count; ++i) {
@@ -484,9 +520,37 @@ static VkPresentModeKHR get_swapchain_present_mode(VkPhysicalDevice physical_dev
 VkSwapchainKHR vk_create_swapchain(VkPhysicalDevice physical_device, VkDevice device, VkSurfaceKHR surface) {
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
 
-    VkExtent2D extent = get_swapchain_extent(physical_device, surface);
+    VkSurfaceCapabilitiesKHR capabilities = {};
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, surface, &capabilities);
+
+    VkExtent2D extent = get_swapchain_extent(&capabilities);
+    uint32_t image_count = capabilities.minImageCount + 1;
+    if (capabilities.maxImageCount > 0 && image_count > capabilities.maxImageCount) {
+        image_count = capabilities.maxImageCount;
+    }
+
     VkSurfaceFormatKHR format = get_swapchain_format(physical_device, surface);
     VkPresentModeKHR present_mode = get_swapchain_present_mode(physical_device, surface);
+
+    VkSwapchainCreateInfoKHR swapchain_create_info = {
+        .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+        .surface = surface,
+        .minImageCount = image_count,
+        .imageFormat = format.format,
+        .imageColorSpace = format.colorSpace,
+        .imageExtent = extent,
+        .imageArrayLayers = 1,
+        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        // TODO unless we have two different queues for graphics and presentation
+        .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .preTransform = capabilities.currentTransform,
+        .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+        .presentMode = present_mode,
+        .clipped = VK_TRUE,
+        // TODO old swapchain?
+    };
+
+    VK_CHECK(vkCreateSwapchainKHR(device, &swapchain_create_info, NULL, &swapchain));
 
     return swapchain;
 }
@@ -496,7 +560,7 @@ QEMUVulkanContext vk_create_context(void)
     QEMUVulkanContext ctx = {};
 
     ctx.instance = vk_create_instance();
-    ctx.physical_device = vk_create_physical_device(ctx.instance);
+    ctx.physical_device = vk_create_physical_device(ctx.instance, VK_NULL_HANDLE);
     ctx.device = vk_create_device(ctx.instance, ctx.physical_device);
 
     return ctx;

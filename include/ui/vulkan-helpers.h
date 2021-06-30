@@ -29,7 +29,7 @@ void vk_fb_setup_new_tex(VkDevice device, vulkan_fb *fb, int width, int height);
 void vk_fb_destroy(VkDevice device, vulkan_fb *fb);
 
 VkInstance vk_create_instance(void);
-VkPhysicalDevice vk_create_physical_device(VkInstance i);
+VkPhysicalDevice vk_create_physical_device(VkInstance i, VkSurfaceKHR s);
 VkDevice vk_create_device(VkInstance i, VkPhysicalDevice pd);
 VkSwapchainKHR vk_create_swapchain(VkPhysicalDevice pd, VkDevice d, VkSurfaceKHR s);
 
