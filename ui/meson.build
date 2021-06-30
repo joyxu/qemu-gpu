@@ -65,7 +65,7 @@ endif
 if config_host.has_key('CONFIG_VULKAN')
   vulkan_headless_ss = ss.source_set()
   vulkan_headless_ss.add(when: [vulkan, 'CONFIG_VULKAN'],
-                         if_true: files('vulkan-helpers.c', 'vulkan-headless.c', 'vulkan-shader.c', 'vulkan-context.c'))
+                         if_true: files('vulkan-helpers.c', 'vulkan-headless.c', 'vulkan-shader.c', 'console-vk.c', 'vulkan-context.c'))
   ui_modules += {'vulkan-headless' : vulkan_headless_ss}
 endif
 

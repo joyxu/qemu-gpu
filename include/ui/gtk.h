@@ -61,10 +61,13 @@ typedef struct VirtualGfxConsole {
 #endif
 #if defined(CONFIG_VULKAN)
     VkInstance vk_instance;
+    VkPhysicalDevice vk_physical_device;
     VkDevice vk_device;
     VkSurfaceKHR vk_surface;
-    QemuVkShader *vks;
+    VkSwapchainKHR vk_swapchain;
+    QEMUVulkanShader *vks;
     vulkan_fb guest_vk_fb;
+    vulkan_fb win_vk_fb;
 #endif
 } VirtualGfxConsole;
 
@@ -237,8 +240,7 @@ void gd_vk_update(DisplayChangeListener *dcl,
 void gd_vk_refresh(DisplayChangeListener *dcl);
 void gd_vk_switch(DisplayChangeListener *dcl,
                    DisplaySurface *surface);
-QEMUVulkanContext gd_vk_create_context(DisplayChangeListener *dcl,
-                                    QEMUGLParams *params);
+QEMUVulkanContext gd_vk_create_context(DisplayChangeListener *dcl);
 void gd_vk_scanout_disable(DisplayChangeListener *dcl);
 void gd_vk_scanout_texture(DisplayChangeListener *dcl,
                             vulkan_texture backing_texture,

@@ -34,8 +34,8 @@ static void gtk_vk_set_scanout_mode(VirtualConsole *vc, bool scanout)
         vk_fb_destroy(&vc->gfx.guest_vk_fb);
         if (vc->gfx.surface) {
             // TODO destroy create vk texture (or framebuffer?)
-            //surface_gl_destroy_texture(vc->gfx.gls, vc->gfx.ds);
-            //surface_gl_create_texture(vc->gfx.gls, vc->gfx.ds);
+            surface_vk_destroy_texture(vc->gfx.vk_device, vc->gfx.ds);
+            surface_vk_create_texture(vc->gfx.vk_device, vc->gfx.vk_surface, vc->gfx.ds);
         }
     }
 }
@@ -57,9 +57,11 @@ void gd_vk_init(VirtualConsole *vc)
     GdkDisplay *gdk_display = gdk_window_get_display(gdk_window);
     Display *dpy = gdk_x11_display_get_xdisplay(gdk_display);
 
-    vc->gfx.vk_instance = qemu_vk_create_instance();
-    vc->gfx.vk_device = qemu_vk_create_device(vc->gfx.vk_instance);
+    vc->gfx.vk_instance = vk_create_instance();
+    vc->gfx.vk_physical_device = vk_create_physical_device(vc->gfx.vk_instance);
+    vc->gfx.vk_device = vk_create_device(vc->gfx.vk_instance, vc->gfx.vk_physical_device);
     vc->gfx.vk_surface = qemu_vk_init_surface_x11(vc->gfx.vk_instance, dpy, x11_window);
+    vc->gfx.vk_swapchain = vk_create_swapchain(vc->gfx.vk_device, vc->gfx.vk_surface);
 
     assert(vc->gfx.vk_surface);
 }
@@ -113,6 +115,7 @@ void gd_vk_update(DisplayChangeListener *dcl,
         return;
     }
 
+    // TODO recreate swapchain?
 /*
     eglMakeCurrent(qemu_egl_display, vc->gfx.esurface,
                    vc->gfx.esurface, vc->gfx.ectx);
@@ -137,7 +140,7 @@ void gd_vk_refresh(DisplayChangeListener *dcl)
         }
         vc->gfx.vks = qemu_vk_init_shader(vc->gfx.vk_device);
         if (vc->gfx.ds) {
-           // surface_gl_create_texture(vc->gfx.vks, vc->gfx.ds);
+           surface_vk_create_texture(vc->gfx.vk_device, vc->gfx.vk_surface, vc->gfx.ds);
         }
     }
 
@@ -152,7 +155,7 @@ void gd_vk_refresh(DisplayChangeListener *dcl)
 }
 
 void gd_vk_switch(DisplayChangeListener *dcl,
-                   DisplaySurface *surface)
+                  DisplaySurface *surface)
 {
     VirtualConsole *vc = container_of(dcl, VirtualConsole, gfx.dcl);
     bool resized = true;
@@ -165,12 +168,10 @@ void gd_vk_switch(DisplayChangeListener *dcl,
         resized = false;
     }
 
-    // TODO: surface_vk_destroy_texture
-    //surface_gl_destroy_texture(vc->gfx.gls, vc->gfx.ds);
+    surface_vk_destroy_texture(vc->gfx.vk_device, vc->gfx.ds);
     vc->gfx.ds = surface;
     if (vc->gfx.vks) {
-        // TODO: create texture
-        //surface_gl_create_texture(vc->gfx.gls, vc->gfx.ds);
+        surface_vk_create_texture(vc->gfx.vk_device, vc->gfx.vk_surface, vc->gfx.ds);
     }
 
     if (resized) {
@@ -178,14 +179,9 @@ void gd_vk_switch(DisplayChangeListener *dcl,
     }
 }
 
-QEMUVulkanContext gd_vk_create_context(DisplayChangeListener *dcl,
-                                       QEMUGLParams *params)
+QEMUVulkanContext gd_vk_create_context(DisplayChangeListener *dcl)
 {
-    VirtualConsole *vc = container_of(dcl, VirtualConsole, gfx.dcl);
-
-    // TODO: create vulkan context
-    //return qemu_vk_create_context(dcl, params);
-    return VK_NULL_HANDLE;
+    return vk_create_context();
 }
 
 void gd_vk_scanout_disable(DisplayChangeListener *dcl)
@@ -210,9 +206,6 @@ void gd_vk_scanout_texture(DisplayChangeListener *dcl,
     vc->gfx.w = w;
     vc->gfx.h = h;
     vc->gfx.y0_top = backing_y_0_top;
-
-    eglMakeCurrent(qemu_egl_display, vc->gfx.esurface,
-                   vc->gfx.esurface, vc->gfx.ectx);
 
     gtk_vk_set_scanout_mode(vc, true);
     vk_fb_setup_for_tex(&vc->gfx.guest_vk_fb, texture);
@@ -284,31 +277,33 @@ void gd_vk_scanout_flush(DisplayChangeListener *dcl,
     if (!vc->gfx.scanout_mode) {
         return;
     }
-    /*
-    if (!vc->gfx.guest_fb.framebuffer) {
+
+    if (vc->gfx.guest_vk_fb.framebuffer == VK_NULL_HANDLE) {
         return;
     }
 
-    eglMakeCurrent(qemu_egl_display, vc->gfx.esurface,
-                   vc->gfx.esurface, vc->gfx.ectx);
+    //eglMakeCurrent(qemu_egl_display, vc->gfx.esurface,
+    //               vc->gfx.esurface, vc->gfx.ectx);
 
     window = gtk_widget_get_window(vc->gfx.drawing_area);
     ww = gdk_window_get_width(window);
     wh = gdk_window_get_height(window);
-    egl_fb_setup_default(&vc->gfx.win_fb, ww, wh);
+    vk_fb_setup_default(&vc->gfx.win_fb, ww, wh);
+    // TODO acquire next image?
+
     if (vc->gfx.cursor_fb.texture) {
-        egl_texture_blit(vc->gfx.gls, &vc->gfx.win_fb, &vc->gfx.guest_fb,
-                         vc->gfx.y0_top);
-        egl_texture_blend(vc->gfx.gls, &vc->gfx.win_fb, &vc->gfx.cursor_fb,
-                          vc->gfx.y0_top,
-                          vc->gfx.cursor_x, vc->gfx.cursor_y,
-                          vc->gfx.scale_x, vc->gfx.scale_y);
+        //vk_texture_blit(vc->gfx.gls, &vc->gfx.win_fb, &vc->gfx.guest_fb,
+        //                 vc->gfx.y0_top);
+        //vk_texture_blend(vc->gfx.gls, &vc->gfx.win_fb, &vc->gfx.cursor_fb,
+        //                  vc->gfx.y0_top,
+        //                  vc->gfx.cursor_x, vc->gfx.cursor_y,
+        //                  vc->gfx.scale_x, vc->gfx.scale_y);
     } else {
-        egl_fb_blit(&vc->gfx.win_fb, &vc->gfx.guest_fb, !vc->gfx.y0_top);
+        //vk_fb_blit(&vc->gfx.win_fb, &vc->gfx.guest_fb, !vc->gfx.y0_top);
     }
 
-    eglSwapBuffers(qemu_egl_display, vc->gfx.esurface);
-    */
+    // TODO: present
+    //eglSwapBuffers(qemu_egl_display, vc->gfx.esurface);
 }
 
 void gtk_vk_init()

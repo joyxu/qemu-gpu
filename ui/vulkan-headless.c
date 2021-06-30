@@ -12,7 +12,7 @@ typedef struct vulkan_dpy
     DisplayChangeListener dcl;
     DisplaySurface *ds;
     VkDevice device;
-    QemuVkShader *vks;
+    QEMUVulkanShader *vks;
     vulkan_fb guest_fb;
     vulkan_fb cursor_fb;
     vulkan_fb blit_fb;

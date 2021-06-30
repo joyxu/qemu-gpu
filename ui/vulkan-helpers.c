@@ -64,6 +64,22 @@ void vk_fb_destroy(vulkan_fb *fb)
     fb->framebuffer = VK_NULL_HANDLE;
 }
 
+// Default framebuffer is the one using the swapchain images
+void vk_fb_setup_default(vulkan_fb *fb, int width, int height)
+{
+    if (fb->framebuffer != VK_NULL_HANDLE) {
+        return; // TODO: already setup?
+    }
+
+    // Do not delete image when destroying this framebuffer as it is a managed swapchain image
+    fb->texture.delete_image = false;
+    fb->texture.width = width;
+    fb->texture.height = height;
+
+    // TODO: Create a framebuffer with a swapchain image
+    fb->framebuffer = VK_NULL_HANDLE;
+}
+
 void vk_fb_setup_for_tex(vulkan_fb *fb, vulkan_texture texture)
 {
     // Destroy previous texture and then set the new one
@@ -165,13 +181,14 @@ VkInstance vk_create_instance(void)
         VK_KHR_SURFACE_EXTENSION_NAME,
         VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
         VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
         VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
     };
 
     VkInstanceCreateInfo instance_create_info = {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pApplicationInfo = &app_info,
-        .enabledExtensionCount = 3, // exclude debug report for the moment
+        .enabledExtensionCount = 4, // exclude debug report for the moment
         .ppEnabledExtensionNames = extension_names,
     };
 
@@ -240,7 +257,7 @@ VkInstance vk_create_instance(void)
     return instance;
 }
 
-static VkDevice vk_create_device(VkInstance instance)
+VkPhysicalDevice vk_create_physical_device(VkInstance instance)
 {
     uint32_t device_count = 0;
     VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, NULL));
@@ -248,10 +265,15 @@ static VkDevice vk_create_device(VkInstance instance)
 
     VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, physical_devices));
 
-    // TODO: select physical device based on user input
+    // TODO: select physical device based on user input/other requirements
     VkPhysicalDevice physical_device = physical_devices[0];
     g_free(physical_devices);
 
+    return physical_device;
+}
+
+VkDevice vk_create_device(VkInstance instance, VkPhysicalDevice physical_device)
+{
     VkPhysicalDeviceProperties device_properties;
     vkGetPhysicalDeviceProperties(physical_device, &device_properties);
     g_print("Bringing up Vulkan on %s\n", device_properties.deviceName);
@@ -290,11 +312,12 @@ static VkDevice vk_create_device(VkInstance instance)
     return device;
 }
 
-// TODO: Split this function in multiple ones
+// TODO: What is this function used for?
 VkDevice vk_init(void)
 {
     instance = vk_create_instance();
-    return vk_create_device(instance);
+    VkPhysicalDevice physical_device = vk_create_physical_device(instance);
+    return vk_create_device(instance, physical_device);
 
 }
 
@@ -406,12 +429,19 @@ int qemu_vk_init_dpy_x11(Display *dpy, Window w) {
     vk_create_x11_surface(dpy, w);
 }
 
-VkInstance qemu_vk_create_instance(void)
-{
-    return vk_create_instance();
+VkSwapchainKHR vk_create_swapchain(VkDevice device, VkSurfaceKHR surface) {
+    VkSwapchainKHR swapchain = VK_NULL_HANDLE;
+
+    return swapchain;
 }
 
-VkDevice qemu_vk_create_device(VkInstance instance)
+QEMUVulkanContext vk_create_context(void)
 {
-    return vk_create_device(instance);
+    QEMUVulkanContext ctx = {};
+
+    ctx.instance = vk_create_instance();
+    ctx.physical_device = vk_create_physical_device(ctx.instance);
+    ctx.device = vk_create_device(ctx.instance, ctx.physical_device);
+
+    return ctx;
 }

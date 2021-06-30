@@ -14,6 +14,7 @@
 
 #ifdef CONFIG_VULKAN
 # include <vulkan/vulkan_core.h>
+# include "ui/vulkan-shader.h"
 #endif
 
 /* keyboard/mouse support */
@@ -121,6 +122,13 @@ typedef struct DisplaySurface {
     GLenum gltype;
     GLuint texture;
 #endif
+#ifdef CONFIG_VULKAN
+    VkFormat vkformat;
+    VkImage vkimage;
+    VkImageView vkview;
+    VkSampler vksampler;
+    VkFramebuffer vkframebuffer;
+#endif
 } DisplaySurface;
 
 typedef struct QemuUIInfo {
@@ -156,13 +164,14 @@ void cursor_get_mono_image(QEMUCursor *c, int foreground, uint8_t *mask);
 void cursor_get_mono_mask(QEMUCursor *c, int transparent, uint8_t *mask);
 
 typedef void *QEMUGLContext;
-typedef VkInstance QEMUVulkanContext;
 typedef struct QEMUGLParams QEMUGLParams;
 
 struct QEMUGLParams {
     int major_ver;
     int minor_ver;
 };
+
+typedef struct QEMUVulkanContext QEMUVulkanContext;
 
 typedef struct QemuDmaBuf {
     int       fd;
@@ -445,6 +454,26 @@ void surface_gl_render_texture(QemuGLShader *gls,
 void surface_gl_destroy_texture(QemuGLShader *gls,
                                DisplaySurface *surface);
 void surface_gl_setup_viewport(QemuGLShader *gls,
+                               DisplaySurface *surface,
+                               int ww, int wh);
+#endif
+
+/* console-vk.c */
+#ifdef CONFIG_VULKAN
+bool console_vk_check_format(pixman_format_code_t format);
+void surface_vk_create_texture(VkDevice device,
+                               VkSurfaceKHR vk_surface,
+                               DisplaySurface *surface);
+void surface_vk_update_texture(VkCommandBuffer cmdbuf,
+                               QEMUVulkanShader *vks,
+                               DisplaySurface *surface,
+                               int x, int y, int w, int h);
+void surface_vk_render_texture(VkCommandBuffer cmdbuf,
+                               QEMUVulkanShader *vks,
+                               DisplaySurface *surface);
+void surface_vk_destroy_texture(VkDevice device,
+                                DisplaySurface *surface);
+void surface_vk_setup_viewport(VkCommandBuffer cmdbuf,
                                DisplaySurface *surface,
                                int ww, int wh);
 #endif

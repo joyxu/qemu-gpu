@@ -1,22 +1,13 @@
 #include "qemu/osdep.h"
 #include "ui/vulkan-context.h"
+#include "ui/vulkan-helpers.h"
 
-QEMUVulkanContext qemu_vk_create_context(DisplayChangeListener *dcl,
-                                         QEMUGLParams *params)
+QEMUVulkanContext qemu_vk_create_context(void)
 {
-   return vk_create_instance();
+   return vk_create_context();
 }
 
-void qemu_vk_destroy_context(DisplayChangeListener *dcl, QEMUVulkanContext ctx)
+void qemu_vk_destroy_context(QEMUVulkanContext ctx)
 {
-    vkDestroyInstance(ctx, NULL);
-}
-
-int qemu_vk_make_context_current(DisplayChangeListener *dcl,
-                                  QEMUVulkanContext ctx)
-{
-    // TODO: is this needed? no?
-   //return eglMakeCurrent(qemu_egl_display,
-   //                      EGL_NO_SURFACE, EGL_NO_SURFACE, ctx);
-   return 0;
+    vkDestroyInstance(ctx.instance, NULL);
 }

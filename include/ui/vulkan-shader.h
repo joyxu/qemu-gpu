@@ -3,11 +3,11 @@
 
 #include <vulkan/vulkan_core.h>
 
-typedef struct QemuVkShader QemuVkShader;
+typedef struct QEMUVulkanShader QEMUVulkanShader;
 
-void qemu_vk_run_texture_blit(QemuVkShader *gls, bool flip);
+void qemu_vk_run_texture_blit(VkCommandBuffer cmdbuf, QEMUVulkanShader *gls, bool flip);
 
-QemuVkShader *qemu_vk_init_shader(VkDevice device);
-void qemu_vk_fini_shader(QemuVkShader *gls);
+QEMUVulkanShader *qemu_vk_init_shader(VkDevice device);
+void qemu_vk_fini_shader(QEMUVulkanShader *gls);
 
 #endif /* QEMU_VK_SHADER_H */

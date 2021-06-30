@@ -37,7 +37,7 @@
 
 #define VK_CHECK(res) g_assert(res == VK_SUCCESS)
 
-struct QemuVkShader
+struct QEMUVulkanShader
 {
     VkPipeline texture_blit_pipeline;
     VkPipeline texture_blit_flip_pipeline;
@@ -86,16 +86,12 @@ qemu_vk_init_texture_blit_vertex_buffer(VkDevice device)
     return buffer;
 }
 
-#if 0
-void qemu_vk_run_texture_blit(QemuVkShader *gls, bool flip)
+void qemu_vk_run_texture_blit(VkCommandBuffer cmdbuf, QEMUVulkanShader *vks, bool flip)
 {
-    glUseProgram(flip
-                 ? gls->texture_blit_flip_prog
-                 : gls->texture_blit_prog);
-    glBindVertexArray(gls->texture_blit_vao);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, flip ? vks->texture_blit_flip_pipeline : vks->texture_blit_pipeline);
+    vkCmdBindVertexBuffers(cmdbuf, 0, 1, vks->texture_blit_vertex_buffer, 0);
+    vkCmdDraw(cmdbuf, 4, 1, 0, 0);
 }
-#endif
 
 /* ---------------------------------------------------------------------- */
 static VkShaderModule qemu_vk_create_compile_shader(VkDevice device, const char *src, size_t code_size)
@@ -328,9 +324,9 @@ static VkPipeline qemu_vk_create_pipeline_layout_from_sources(VkDevice device,
 
 /* ---------------------------------------------------------------------- */
 
-QemuVkShader *qemu_vk_init_shader(VkDevice device)
+QEMUVulkanShader *qemu_vk_init_shader(VkDevice device)
 {
-    QemuVkShader *vks = g_new0(QemuVkShader, 1);
+    QEMUVulkanShader *vks = g_new0(QEMUVulkanShader, 1);
 
     vks->texture_blit_pipeline =
         qemu_vk_create_pipeline_layout_from_sources(device,
@@ -348,7 +344,7 @@ QemuVkShader *qemu_vk_init_shader(VkDevice device)
     return vks;
 }
 
-void qemu_vk_fini_shader(QemuVkShader *vks)
+void qemu_vk_fini_shader(QEMUVulkanShader *vks)
 {
     if (!vks)
     {
