@@ -24,12 +24,12 @@
 #define VK_CHECK(res) g_assert(res == VK_SUCCESS)
 
 // TODO where do we destroy these?
-VkInstance instance;
-VkDevice device;
+//VkInstance instance;
+//VkDevice device;
 
 /* -- */
 
-static void vk_texture_destroy(vulkan_texture *texture)
+static void vk_texture_destroy(VkDevice device, vulkan_texture *texture)
 {
     if (texture->delete_image)
     {
@@ -52,14 +52,14 @@ static void vk_texture_destroy(vulkan_texture *texture)
     texture->height = 0;
 }
 
-void vk_fb_destroy(vulkan_fb *fb)
+void vk_fb_destroy(VkDevice device, vulkan_fb *fb)
 {
     if (fb->framebuffer == VK_NULL_HANDLE)
     {
         return;
     }
 
-    vk_texture_destroy(&fb->texture);
+    vk_texture_destroy(device, &fb->texture);
     vkDestroyFramebuffer(device, fb->framebuffer, NULL);
     fb->framebuffer = VK_NULL_HANDLE;
 }
@@ -80,10 +80,10 @@ void vk_fb_setup_default(vulkan_fb *fb, int width, int height)
     fb->framebuffer = VK_NULL_HANDLE;
 }
 
-void vk_fb_setup_for_tex(vulkan_fb *fb, vulkan_texture texture)
+void vk_fb_setup_for_tex(VkDevice device, vulkan_fb *fb, vulkan_texture texture)
 {
     // Destroy previous texture and then set the new one
-    vk_texture_destroy(&fb->texture);
+    vk_texture_destroy(device, &fb->texture);
     fb->texture = texture;
 
     if (fb->framebuffer == VK_NULL_HANDLE)
@@ -102,7 +102,7 @@ void vk_fb_setup_for_tex(vulkan_fb *fb, vulkan_texture texture)
     }
 }
 
-void vk_fb_setup_new_tex(vulkan_fb *fb, int width, int height)
+void vk_fb_setup_new_tex(VkDevice device, vulkan_fb *fb, int width, int height)
 {
     vulkan_texture texture = {
         .width = width,
@@ -147,7 +147,7 @@ void vk_fb_setup_new_tex(vulkan_fb *fb, int width, int height)
 
     VK_CHECK(vkCreateImageView(device, &image_view_create_info, NULL, &texture.view));
 
-    vk_fb_setup_for_tex(fb, texture);
+    vk_fb_setup_for_tex(device, fb, texture);
 }
 
 /* -- */
@@ -181,14 +181,13 @@ VkInstance vk_create_instance(void)
         VK_KHR_SURFACE_EXTENSION_NAME,
         VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
         VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
         VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
     };
 
     VkInstanceCreateInfo instance_create_info = {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pApplicationInfo = &app_info,
-        .enabledExtensionCount = 4, // exclude debug report for the moment
+        .enabledExtensionCount = 3, // exclude debug report for the moment
         .ppEnabledExtensionNames = extension_names,
     };
 
@@ -299,10 +298,16 @@ VkDevice vk_create_device(VkInstance instance, VkPhysicalDevice physical_device)
         }
     }
 
+    const char** extension_names[] = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    };
+
     VkDeviceCreateInfo device_create_info = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .queueCreateInfoCount = 1,
         .pQueueCreateInfos = &queue_create_info,
+        .enabledExtensionCount = 1,
+        .ppEnabledExtensionNames = extension_names,
     };
 
     VkDevice device = VK_NULL_HANDLE;
@@ -315,13 +320,12 @@ VkDevice vk_create_device(VkInstance instance, VkPhysicalDevice physical_device)
 // TODO: What is this function used for?
 VkDevice vk_init(void)
 {
-    instance = vk_create_instance();
+    VkInstance instance = vk_create_instance();
     VkPhysicalDevice physical_device = vk_create_physical_device(instance);
     return vk_create_device(instance, physical_device);
-
 }
 
-static VkSurfaceKHR vk_create_wayland_surface(struct wl_display* dpy, struct wl_surface* s)
+static VkSurfaceKHR vk_create_wayland_surface(VkInstance instance, struct wl_display* dpy, struct wl_surface* s)
 {
     VkWaylandSurfaceCreateInfoKHR surface_create_info = {
         .sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR,
@@ -349,7 +353,7 @@ VkSurfaceKHR qemu_vk_init_surface_x11(VkInstance instance, Display* dpy, Window 
     return surface;
 }
 
-static VkSurfaceKHR vk_create_x11_surface(Display *dpy, Window w)
+static VkSurfaceKHR vk_create_x11_surface(VkInstance instance, Display *dpy, Window w)
 {
     return qemu_vk_init_surface_x11(instance, dpy, w);
 }
@@ -419,18 +423,70 @@ static int qemu_vk_init_dpy(VkDisplayKHR dpy,
 /// Initializes Vulkan for a wayland display
 int qemu_vk_init_dpy_wayland(struct wl_display *dpy, struct wl_surface *s)
 {
-    vk_init();
-    vk_create_wayland_surface(dpy, s);
+    VkInstance instance = vk_create_instance();
+    vk_create_wayland_surface(instance, dpy, s);
 }
 
 /// Initializes Vulkan for an X11 display
-int qemu_vk_init_dpy_x11(Display *dpy, Window w) {
-    vk_init();
-    vk_create_x11_surface(dpy, w);
+int qemu_vk_init_dpy_x11(Display *dpy, Window w)
+{
+    VkInstance instance = vk_create_instance();
+    vk_create_x11_surface(instance, dpy, w);
 }
 
-VkSwapchainKHR vk_create_swapchain(VkDevice device, VkSurfaceKHR surface) {
+static VkExtent2D get_swapchain_extent(VkPhysicalDevice physical_device, VkSurfaceKHR surface) {
+    VkSurfaceCapabilitiesKHR capabilities = {};
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, surface, &capabilities);
+    g_assert(capabilities.currentExtent.width != UINT32_MAX);
+    return capabilities.currentExtent;
+}
+
+static VkSurfaceFormatKHR get_swapchain_format(VkPhysicalDevice physical_device, VkSurfaceKHR surface) {
+
+    uint32_t format_count;
+    VkSurfaceFormatKHR format = {};
+    VkSurfaceFormatKHR *formats = g_new(VkSurfaceFormatKHR, format_count);
+
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &format_count, NULL));
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &format_count, formats));
+
+    for (uint32_t i = 0; i < format_count; ++i) {
+        if (formats[i].format == VK_FORMAT_B8G8R8A8_SRGB && formats[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            format = formats[i];
+            break;
+        }
+    }
+
+    g_free(formats);
+    g_assert(format.format != VK_FORMAT_UNDEFINED);
+    return format;
+}
+
+static VkPresentModeKHR get_swapchain_present_mode(VkPhysicalDevice physical_device, VkSurfaceKHR surface) {
+    uint32_t present_count;
+    VkPresentModeKHR present_mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+    VkPresentModeKHR *present_modes = g_new(VkPresentModeKHR, present_count);
+
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device, surface, &present_count, NULL));
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device, surface, &present_count, present_modes));
+
+    for (uint32_t i = 0; i < present_count; ++i) {
+        if (present_modes[i] == VK_PRESENT_MODE_FIFO_KHR) {
+            present_mode = present_modes[i];
+            break;
+        }
+    }
+
+    g_free(present_modes);
+    return present_mode;
+}
+
+VkSwapchainKHR vk_create_swapchain(VkPhysicalDevice physical_device, VkDevice device, VkSurfaceKHR surface) {
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
+
+    VkExtent2D extent = get_swapchain_extent(physical_device, surface);
+    VkSurfaceFormatKHR format = get_swapchain_format(physical_device, surface);
+    VkPresentModeKHR present_mode = get_swapchain_present_mode(physical_device, surface);
 
     return swapchain;
 }

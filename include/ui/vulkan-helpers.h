@@ -8,8 +8,6 @@
 
 #include "ui/vulkan-context.h"
 
-extern VkDevice device;
-
 typedef struct vulkan_texture
 {
     int width;
@@ -26,14 +24,14 @@ typedef struct vulkan_fb
     VkFramebuffer framebuffer;
 } vulkan_fb;
 
-void vk_fb_setup_for_tex(vulkan_fb *fb, vulkan_texture texture);
-void vk_fb_setup_new_tex(vulkan_fb *fb, int width, int height);
-void vk_fb_destroy(vulkan_fb *fb);
+void vk_fb_setup_for_tex(VkDevice device, vulkan_fb *fb, vulkan_texture texture);
+void vk_fb_setup_new_tex(VkDevice device, vulkan_fb *fb, int width, int height);
+void vk_fb_destroy(VkDevice device, vulkan_fb *fb);
 
 VkInstance vk_create_instance(void);
-VkPhysicalDevice vk_create_physical_device(VkInstance);
-VkDevice vk_create_device(VkInstance, VkPhysicalDevice);
-VkSwapchainKHR vk_create_swapchain(VkDevice, VkSurfaceKHR);
+VkPhysicalDevice vk_create_physical_device(VkInstance i);
+VkDevice vk_create_device(VkInstance i, VkPhysicalDevice pd);
+VkSwapchainKHR vk_create_swapchain(VkPhysicalDevice pd, VkDevice d, VkSurfaceKHR s);
 
 VkDevice vk_init(void);
 

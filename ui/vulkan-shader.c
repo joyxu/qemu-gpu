@@ -344,7 +344,7 @@ QEMUVulkanShader *qemu_vk_init_shader(VkDevice device)
     return vks;
 }
 
-void qemu_vk_fini_shader(QEMUVulkanShader *vks)
+void qemu_vk_fini_shader(VkDevice device, QEMUVulkanShader *vks)
 {
     if (!vks)
     {

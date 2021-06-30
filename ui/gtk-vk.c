@@ -31,7 +31,7 @@ static void gtk_vk_set_scanout_mode(VirtualConsole *vc, bool scanout)
 
     vc->gfx.scanout_mode = scanout;
     if (!vc->gfx.scanout_mode) {
-        vk_fb_destroy(&vc->gfx.guest_vk_fb);
+        vk_fb_destroy(vc->gfx.vk_device, &vc->gfx.guest_vk_fb);
         if (vc->gfx.surface) {
             // TODO destroy create vk texture (or framebuffer?)
             surface_vk_destroy_texture(vc->gfx.vk_device, vc->gfx.ds);
@@ -61,7 +61,7 @@ void gd_vk_init(VirtualConsole *vc)
     vc->gfx.vk_physical_device = vk_create_physical_device(vc->gfx.vk_instance);
     vc->gfx.vk_device = vk_create_device(vc->gfx.vk_instance, vc->gfx.vk_physical_device);
     vc->gfx.vk_surface = qemu_vk_init_surface_x11(vc->gfx.vk_instance, dpy, x11_window);
-    vc->gfx.vk_swapchain = vk_create_swapchain(vc->gfx.vk_device, vc->gfx.vk_surface);
+    vc->gfx.vk_swapchain = vk_create_swapchain(vc->gfx.vk_physical_device, vc->gfx.vk_device, vc->gfx.vk_surface);
 
     assert(vc->gfx.vk_surface);
 }
@@ -208,7 +208,7 @@ void gd_vk_scanout_texture(DisplayChangeListener *dcl,
     vc->gfx.y0_top = backing_y_0_top;
 
     gtk_vk_set_scanout_mode(vc, true);
-    vk_fb_setup_for_tex(&vc->gfx.guest_vk_fb, texture);
+    vk_fb_setup_for_tex(vc->gfx.vk_device, &vc->gfx.guest_vk_fb, texture);
 }
 
 void gd_vk_scanout_dmabuf(DisplayChangeListener *dcl,
