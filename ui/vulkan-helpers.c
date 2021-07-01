@@ -1,6 +1,9 @@
 /*
  * Copyright (C) 2021 Collabora Ltd.
  *
+ * Authors:
+ *    Antonio Caggiano <antonio.caggiano@collabora.com>
+ *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -39,13 +42,13 @@ static void vk_texture_destroy(VkDevice device, vulkan_texture *texture)
             texture->image = VK_NULL_HANDLE;
         }
 
-        texture->delete_image = false;
-    }
+        if (texture->view != VK_NULL_HANDLE)
+        {
+            vkDestroyImageView(device, texture->view, NULL);
+            texture->view = VK_NULL_HANDLE;
+        }
 
-    if (texture->view != VK_NULL_HANDLE)
-    {
-        vkDestroyImageView(device, texture->view, NULL);
-        texture->view = VK_NULL_HANDLE;
+        texture->delete_image = false;
     }
 
     texture->width = 0;
@@ -54,52 +57,80 @@ static void vk_texture_destroy(VkDevice device, vulkan_texture *texture)
 
 void vk_fb_destroy(VkDevice device, vulkan_fb *fb)
 {
-    if (fb->framebuffer == VK_NULL_HANDLE)
+    if (!fb->framebuffers)
     {
         return;
     }
 
     vk_texture_destroy(device, &fb->texture);
-    vkDestroyFramebuffer(device, fb->framebuffer, NULL);
-    fb->framebuffer = VK_NULL_HANDLE;
+
+    for (uint32_t i = 0; i < fb->framebuffer_count; ++i) {
+        vkDestroyFramebuffer(device, fb->framebuffers[i], NULL);
+        fb->framebuffers[i] = VK_NULL_HANDLE;
+    }
+
+    g_free(fb->framebuffers);
+    fb->framebuffer_count = 0;
 }
 
 // Default framebuffer is the one using the swapchain images
-void vk_fb_setup_default(vulkan_fb *fb, int width, int height)
+void vk_fb_setup_default(VkDevice device, QEMUVkSwapchain swapchain, VkRenderPass render_pass, vulkan_fb *fb, int width, int height)
 {
-    if (fb->framebuffer != VK_NULL_HANDLE) {
+    g_assert(width == swapchain.extent.width && height == swapchain.extent.height);
+
+    if (fb->framebuffers != NULL) {
         return; // TODO: already setup?
     }
 
-    // Do not delete image when destroying this framebuffer as it is a managed swapchain image
-    fb->texture.delete_image = false;
-    fb->texture.width = width;
-    fb->texture.height = height;
+    fb->texture = (vulkan_texture) {
+        .width = width,
+        .height = height,
+        .image = VK_NULL_HANDLE,
+        .view = VK_NULL_HANDLE,
+        // Do not delete image when destroying this framebuffer as it is a managed swapchain image
+        .delete_image = false,
+    };
 
-    // TODO: Create a framebuffer with a swapchain image
-    fb->framebuffer = VK_NULL_HANDLE;
+    fb->framebuffer_count = swapchain.image_count;
+    fb->framebuffers = g_new(VkFramebuffer, fb->framebuffer_count);
+
+    for (uint32_t i = 0; i < swapchain.image_count; ++i) {
+        VkImageView attachments[] = { swapchain.views[i] };
+        VkFramebufferCreateInfo framebuffer_create_info = {
+            .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+            .renderPass = render_pass,
+            .attachmentCount = 1,
+            .pAttachments = attachments,
+            .width = width,
+            .height = height,
+            .layers = 1,
+        };
+
+        VK_CHECK(vkCreateFramebuffer(device, &framebuffer_create_info, NULL, &fb->framebuffers[i]));
+    }
 }
 
 void vk_fb_setup_for_tex(VkDevice device, vulkan_fb *fb, vulkan_texture texture)
 {
-    // Destroy previous texture and then set the new one
-    vk_texture_destroy(device, &fb->texture);
+    // Destroy previous framebuffer and then set the new one
+    vk_fb_destroy(device, fb);
+
     fb->texture = texture;
 
-    if (fb->framebuffer == VK_NULL_HANDLE)
-    {
-        VkFramebufferCreateInfo framebuffer_create_info = {
-            .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-            .renderPass = VK_NULL_HANDLE,
-            .attachmentCount = 1,
-            .pAttachments = &fb->texture.view,
-            .width = fb->texture.width,
-            .height = fb->texture.height,
-            .layers = 1,
-        };
+    fb->framebuffer_count = 1;
+    fb->framebuffers = g_new(VkFramebuffer, 1);
 
-        VK_CHECK(vkCreateFramebuffer(device, &framebuffer_create_info, NULL, &fb->framebuffer));
-    }
+    VkFramebufferCreateInfo framebuffer_create_info = {
+        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+        .renderPass = VK_NULL_HANDLE,
+        .attachmentCount = 1,
+        .pAttachments = &fb->texture.view,
+        .width = fb->texture.width,
+        .height = fb->texture.height,
+        .layers = 1,
+    };
+
+    VK_CHECK(vkCreateFramebuffer(device, &framebuffer_create_info, NULL, &fb->framebuffers[0]));
 }
 
 void vk_fb_setup_new_tex(VkDevice device, vulkan_fb *fb, int width, int height)
@@ -319,6 +350,8 @@ QEMUVkPhysicalDevice vk_get_physical_device(VkInstance instance, VkSurfaceKHR su
         }
     }
 
+    vkGetPhysicalDeviceMemoryProperties(physical_device.handle, &physical_device.memory_properties);
+
     g_free(physical_devices);
     g_assert(physical_device.handle != VK_NULL_HANDLE);
     return physical_device;
@@ -367,18 +400,37 @@ QEMUVkDevice vk_create_device(VkInstance instance, QEMUVkPhysicalDevice physical
     };
 
     QEMUVkDevice device = {
+        .physical_device = physical_device,
         .handle = VK_NULL_HANDLE,
         .graphics_queue = VK_NULL_HANDLE,
         .present_queue = VK_NULL_HANDLE,
     };
 
-    VK_CHECK(vkCreateDevice(physical_device.handle, &device_create_info, NULL, &device));
+    VK_CHECK(vkCreateDevice(physical_device.handle, &device_create_info, NULL, &device.handle));
 
     g_free(queue_create_infos);
     g_assert(device.handle != VK_NULL_HANDLE);
 
     vkGetDeviceQueue(device.handle, physical_device.queue_family_indices.graphics, 0, &device.graphics_queue);
     vkGetDeviceQueue(device.handle, physical_device.queue_family_indices.present, 0, &device.present_queue);
+
+    // Command pool
+    VkCommandPoolCreateInfo command_pool_create_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .queueFamilyIndex = physical_device.queue_family_indices.graphics,
+    };
+
+    VK_CHECK(vkCreateCommandPool(device.handle, &command_pool_create_info, NULL, &device.command_pool));
+
+    // General command buffer
+    VkCommandBufferAllocateInfo command_buffer_alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = device.command_pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+
+    VK_CHECK(vkAllocateCommandBuffers(device.handle, &command_buffer_alloc_info, &device.general_command_buffer));
 
     return device;
 }
@@ -595,6 +647,25 @@ QEMUVkSwapchain vk_create_swapchain(QEMUVkPhysicalDevice physical_device, VkDevi
     g_assert(swapchain.image_count > 0);
     swapchain.images = g_new(VkImage, swapchain.image_count);
     vkGetSwapchainImagesKHR(device, swapchain.handle, &swapchain.image_count, swapchain.images);
+
+    swapchain.views = g_new(VkImageView, swapchain.image_count);
+
+    VkImageViewCreateInfo image_view_create_info = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = VK_NULL_HANDLE,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = swapchain.format,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .levelCount = 1,
+            .layerCount = 1,
+        }
+    };
+
+    for (uint32_t i = 0; i < swapchain.image_count; ++i) {
+        image_view_create_info.image = swapchain.images[i];
+        VK_CHECK(vkCreateImageView(device, &image_view_create_info, NULL, &swapchain.views[i]));
+    }
 
     return swapchain;
 }

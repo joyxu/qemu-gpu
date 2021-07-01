@@ -37,12 +37,6 @@
 
 #define VK_CHECK(res) g_assert(res == VK_SUCCESS)
 
-struct QEMUVulkanShader
-{
-    VkPipeline texture_blit_pipeline;
-    VkPipeline texture_blit_flip_pipeline;
-    VkBuffer texture_blit_vertex_buffer;
-};
 
 /* ---------------------------------------------------------------------- */
 struct QemuVkVertex
@@ -144,43 +138,6 @@ static VkPipelineLayout qemu_vk_create_pipeline_layout(VkDevice device)
     // TODO destroy set_layout?
 
     return pipeline_layout;
-}
-
-static VkRenderPass qemu_vk_create_render_pass(VkDevice device)
-{
-    VkAttachmentDescription color_attachment = {
-        .format = VK_FORMAT_R8G8B8A8_SRGB, // TODO swapchain format
-        .samples = VK_SAMPLE_COUNT_1_BIT,
-        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-    };
-
-    VkAttachmentReference color_attachment_ref = {
-        .attachment = 0,
-        .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-    };
-
-    VkSubpassDescription subpass = {
-        .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
-        .colorAttachmentCount = 1,
-        .pColorAttachments = &color_attachment_ref,
-    };
-
-    VkRenderPassCreateInfo render_pass_create_info = {
-        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-        .attachmentCount = 1,
-        .pAttachments = &color_attachment,
-        .subpassCount = 1,
-        .pSubpasses = &subpass,
-    };
-
-    VkRenderPass render_pass;
-    VK_CHECK(vkCreateRenderPass(device, &render_pass_create_info, NULL, &render_pass));
-    return render_pass;
 }
 
 static VkPipeline qemu_vk_create_graphics_pipeline(VkDevice device, VkShaderModule vert, VkShaderModule frag, VkPipelineLayout pipeline_layout, VkRenderPass render_pass)
@@ -291,13 +248,13 @@ static VkPipeline qemu_vk_create_graphics_pipeline(VkDevice device, VkShaderModu
     return graphics_pipeline;
 }
 
-static VkPipeline qemu_vk_create_pipeline_layout_from_sources(VkDevice device,
-                                                              const char *vert_src, size_t vert_size,
-                                                              const char *frag_src, size_t frag_size)
+static VkPipeline qemu_vk_create_pipeline_from_sources(VkDevice device,
+                                                       VkRenderPass render_pass,
+                                                       const char *vert_src, size_t vert_size,
+                                                       const char *frag_src, size_t frag_size)
 {
     VkShaderModule vert_shader, frag_shader;
     VkPipelineLayout pipeline_layout;
-    VkRenderPass render_pass;
     VkPipeline graphics_pipeline;
 
     vert_shader = qemu_vk_create_compile_shader(device, vert_src, vert_size);
@@ -309,37 +266,76 @@ static VkPipeline qemu_vk_create_pipeline_layout_from_sources(VkDevice device,
 
     pipeline_layout = qemu_vk_create_pipeline_layout(device);
 
-    render_pass = qemu_vk_create_render_pass(device);
-
     graphics_pipeline = qemu_vk_create_graphics_pipeline(device, vert_shader, frag_shader, pipeline_layout, render_pass);
 
     vkDestroyShaderModule(device, vert_shader, NULL);
     vkDestroyShaderModule(device, frag_shader, NULL);
 
-    // TODO destroy pipeline_layout?
-    // TODO store render_pass?
+    // TODO destroy or store pipeline_layout?
 
     return graphics_pipeline;
 }
 
+static VkRenderPass qemu_vk_init_texture_blit_render_pass(VkDevice device, VkFormat color_attachment_format)
+{
+    VkAttachmentDescription color_attachment = {
+        .format = color_attachment_format,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+    };
+
+    VkAttachmentReference color_attachment_ref = {
+        .attachment = 0,
+        .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    };
+
+    VkSubpassDescription subpass = {
+        .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &color_attachment_ref,
+    };
+
+    VkRenderPassCreateInfo render_pass_create_info = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &color_attachment,
+        .subpassCount = 1,
+        .pSubpasses = &subpass,
+    };
+
+    VkRenderPass render_pass;
+    VK_CHECK(vkCreateRenderPass(device, &render_pass_create_info, NULL, &render_pass));
+    return render_pass;
+}
+
 /* ---------------------------------------------------------------------- */
 
-QEMUVulkanShader *qemu_vk_init_shader(VkDevice device)
+QEMUVulkanShader *qemu_vk_init_shader(VkDevice device, VkFormat color_attachment_format)
 {
     QEMUVulkanShader *vks = g_new0(QEMUVulkanShader, 1);
 
+    vks->texture_blit_render_pass = qemu_vk_init_texture_blit_render_pass(device, color_attachment_format);
+
     vks->texture_blit_pipeline =
-        qemu_vk_create_pipeline_layout_from_sources(device,
-                                                    texture_blit_vert_src, ARRAY_SIZE(texture_blit_vert_src),
-                                                    texture_blit_frag_src, ARRAY_SIZE(texture_blit_frag_src));
+        qemu_vk_create_pipeline_from_sources(device,
+                                             vks->texture_blit_render_pass,
+                                             texture_blit_vert_src, ARRAY_SIZE(texture_blit_vert_src),
+                                             texture_blit_frag_src, ARRAY_SIZE(texture_blit_frag_src));
     vks->texture_blit_flip_pipeline =
-        qemu_vk_create_pipeline_layout_from_sources(device,
-                                                    texture_blit_flip_vert_src, ARRAY_SIZE(texture_blit_flip_vert_src),
-                                                    texture_blit_frag_src, ARRAY_SIZE(texture_blit_frag_src));
+        qemu_vk_create_pipeline_from_sources(device,
+                                             vks->texture_blit_render_pass,
+                                             texture_blit_flip_vert_src, ARRAY_SIZE(texture_blit_flip_vert_src),
+                                             texture_blit_frag_src, ARRAY_SIZE(texture_blit_frag_src));
     g_assert(vks->texture_blit_pipeline != VK_NULL_HANDLE &&
              vks->texture_blit_flip_pipeline != VK_NULL_HANDLE);
 
     vks->texture_blit_vertex_buffer = qemu_vk_init_texture_blit_vertex_buffer(device);
+    
 
     return vks;
 }
@@ -351,6 +347,7 @@ void qemu_vk_fini_shader(VkDevice device, QEMUVulkanShader *vks)
         return;
     }
 
+    vkDestroyRenderPass(device, vks->texture_blit_render_pass, NULL);
     vkDestroyPipeline(device, vks->texture_blit_flip_pipeline, NULL);
     vkDestroyPipeline(device, vks->texture_blit_pipeline, NULL);
     vkDestroyBuffer(device, vks->texture_blit_vertex_buffer, NULL);

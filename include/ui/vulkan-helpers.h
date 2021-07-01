@@ -15,13 +15,17 @@ typedef struct QEMUVkQueueFamilyIndices {
 typedef struct QEMUVkPhysicalDevice {
     VkPhysicalDevice handle;
     QEMUVkQueueFamilyIndices queue_family_indices;
+    VkPhysicalDeviceMemoryProperties memory_properties;
 } QEMUVkPhysicalDevice;
 
 
 typedef struct QEMUVkDevice {
+    QEMUVkPhysicalDevice physical_device;
     VkDevice handle;
     VkQueue graphics_queue;
     VkQueue present_queue;
+    VkCommandPool command_pool;
+    VkCommandBuffer general_command_buffer;
 } QEMUVkDevice;
 
 typedef struct QEMUVkSwapchain {
@@ -30,6 +34,8 @@ typedef struct QEMUVkSwapchain {
     VkExtent2D extent;
     uint32_t image_count;
     VkImage *images;
+    VkImageView *views;
+    VkFramebuffer *framebuffers;
 } QEMUVkSwapchain;
 
 typedef struct QEMUVulkanContext {
@@ -47,17 +53,20 @@ typedef struct vulkan_texture
     VkImage image;
     VkImageView view;
     // This is going to be false in case of a swapchain image
+    // In that case, both image and view are owned by the swapchain
     bool delete_image;
 } vulkan_texture;
 
 typedef struct vulkan_fb
 {
     vulkan_texture texture;
-    VkFramebuffer framebuffer;
+    uint32_t framebuffer_count;
+    VkFramebuffer *framebuffers;
 } vulkan_fb;
 
 void vk_fb_setup_for_tex(VkDevice device, vulkan_fb *fb, vulkan_texture texture);
 void vk_fb_setup_new_tex(VkDevice device, vulkan_fb *fb, int width, int height);
+void vk_fb_setup_default(VkDevice device, QEMUVkSwapchain swapchain, VkRenderPass render_pass, vulkan_fb *fb, int width, int height);
 void vk_fb_destroy(VkDevice device, vulkan_fb *fb);
 
 VkInstance vk_create_instance(void);

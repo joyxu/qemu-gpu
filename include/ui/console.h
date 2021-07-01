@@ -124,11 +124,12 @@ typedef struct DisplaySurface {
     GLuint texture;
 #endif
 #ifdef CONFIG_VULKAN
-    VkFormat vkformat;
-    VkImage vkimage;
-    VkImageView vkview;
-    VkSampler vksampler;
-    VkFramebuffer vkframebuffer;
+    VkFormat vk_format;
+    VkImage vk_image;
+    VkDeviceMemory vk_memory;
+    VkImageView vk_view;
+    VkSampler vk_sampler;
+    VkFramebuffer vk_framebuffer;
 #endif
 } DisplaySurface;
 
@@ -463,7 +464,6 @@ void surface_gl_setup_viewport(QemuGLShader *gls,
 #ifdef CONFIG_VULKAN
 bool console_vk_check_format(pixman_format_code_t format);
 void surface_vk_create_texture(QEMUVkDevice device,
-                               QEMUVkSwapchain swapchain,
                                DisplaySurface *surface);
 void surface_vk_update_texture(VkCommandBuffer cmdbuf,
                                QEMUVulkanShader *vks,

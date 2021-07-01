@@ -217,7 +217,7 @@ static void vk_headless_init(DisplayState *ds, DisplayOptions *opts)
         vdpy->dcl.con = con;
         vdpy->dcl.ops = &vulkan_ops;
         vdpy->device = device.handle; // TODO different device for each display?
-        vdpy->vks = qemu_vk_init_shader(vdpy->device);
+        vdpy->vks = qemu_vk_init_shader(vdpy->device, VK_FORMAT_B8G8R8A8_SRGB);
         register_displaychangelistener(&vdpy->dcl);
     }
 }

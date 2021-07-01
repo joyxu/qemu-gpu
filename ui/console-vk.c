@@ -43,37 +43,83 @@ bool console_vk_check_format(pixman_format_code_t format)
     }
 }
 
+uint32_t get_memory_type_index(QEMUVkPhysicalDevice physical_device,
+                               uint32_t memory_type_filter,
+                               VkMemoryPropertyFlags memory_property_flags)
+{
+    for (uint32_t i = 0; i < physical_device.memory_properties.memoryTypeCount; ++i) {
+        if (memory_type_filter & (1 << i)
+            && ((physical_device.memory_properties.memoryTypes[i].propertyFlags & memory_property_flags) == memory_property_flags)
+        ) {
+            return i;
+        }
+    }
+
+    g_assert(false);
+    return 0;
+}
+
 // TODO: Is this the swapchain image?
 /// I believe this is a texture created to upload data from the display surface
 /// This texture will probably be rendered later with the blit pipelines.
 void surface_vk_create_texture(QEMUVkDevice device,
-                               QEMUVkSwapchain swapchain,
                                DisplaySurface *surface)
 {
     // TODO: what about the format here?
     switch (surface->format) {
     case PIXMAN_BE_b8g8r8x8:
     case PIXMAN_BE_b8g8r8a8:
-        surface->vkformat = VK_FORMAT_B8G8R8A8_UNORM;
+        surface->vk_format = VK_FORMAT_B8G8R8A8_UNORM;
         break;
     case PIXMAN_BE_x8r8g8b8:
     case PIXMAN_BE_a8r8g8b8:
-        surface->vkformat = VK_FORMAT_R8G8B8A8_UNORM;
+        surface->vk_format = VK_FORMAT_R8G8B8A8_UNORM;
         break;
     case PIXMAN_r5g6b5:
-        surface->vkformat = VK_FORMAT_R5G6B5_UNORM_PACK16;
+        surface->vk_format = VK_FORMAT_R5G6B5_UNORM_PACK16;
         break;
     default:
         g_assert_not_reached();
     }
 
-    // TODO: support multiple swapchain images?
+    VkImageCreateInfo image_create_info = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = surface->vk_format,
+        .extent = {
+            .width = surface_width(surface),
+            .height = surface_height(surface),
+            .depth = 1,
+        },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, // TODO: figure out usage
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+
+    VK_CHECK(vkCreateImage(device.handle, &image_create_info, NULL, &surface->vk_image));
+
+    // Memory for the image
+    VkMemoryRequirements memory_requirements;
+    vkGetImageMemoryRequirements(device.handle, surface->vk_image, &memory_requirements);
+
+    VkMemoryAllocateInfo memory_alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = memory_requirements.size,
+        .memoryTypeIndex = get_memory_type_index(device.physical_device, memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
+    };
+
+    VK_CHECK(vkAllocateMemory(device.handle, &memory_alloc_info, NULL, &surface->vk_memory));
+    VK_CHECK(vkBindImageMemory(device.handle, surface->vk_image, surface->vk_memory, 0));
 
     VkImageViewCreateInfo view_create_info = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image = swapchain.images[0],
+        .image = surface->vk_image,
         .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        .format = swapchain.format,
+        .format = surface->vk_format,
         .subresourceRange = {
             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
             .baseMipLevel = 0,
@@ -83,7 +129,7 @@ void surface_vk_create_texture(QEMUVkDevice device,
         }
     };
 
-    VK_CHECK(vkCreateImageView(device.handle, &view_create_info, NULL, &surface->vkview));
+    VK_CHECK(vkCreateImageView(device.handle, &view_create_info, NULL, &surface->vk_view));
 
     VkSamplerCreateInfo sampler_create_info = {
         .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -91,7 +137,7 @@ void surface_vk_create_texture(QEMUVkDevice device,
         .minFilter = VK_FILTER_LINEAR,
     };
 
-    VK_CHECK(vkCreateSampler(device.handle, &sampler_create_info, NULL, &surface->vksampler));
+    VK_CHECK(vkCreateSampler(device.handle, &sampler_create_info, NULL, &surface->vk_sampler));
 
     // TODO upload data from surface to the image?
     // TODO need a command buffer for a graphics queue
@@ -139,7 +185,7 @@ void surface_vk_render_texture(VkCommandBuffer cmdbuf,
     VkRenderPassBeginInfo render_begin_info = {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
         .renderPass = VK_NULL_HANDLE, // TODO Where do we put the renderpass?
-        .framebuffer = surface->vkframebuffer,
+        .framebuffer = surface->vk_framebuffer,
         .renderArea = {
             .extent = {
                 .width = surface_width(surface),
@@ -166,16 +212,16 @@ void surface_vk_render_texture(VkCommandBuffer cmdbuf,
 void surface_vk_destroy_texture(VkDevice device,
                                 DisplaySurface *surface)
 {
-    if (!surface || surface->vkimage == VK_NULL_HANDLE) {
+    if (!surface || surface->vk_image == VK_NULL_HANDLE) {
         return;
     }
     
-    vkDestroySampler(device, surface->vksampler, NULL);
-    surface->vksampler = VK_NULL_HANDLE;
-    vkDestroyImageView(device, surface->vkview, NULL);
-    surface->vkview = VK_NULL_HANDLE;
-    vkDestroyImage(device, surface->vkimage, NULL);
-    surface->vkimage = VK_NULL_HANDLE;
+    vkDestroySampler(device, surface->vk_sampler, NULL);
+    surface->vk_sampler = VK_NULL_HANDLE;
+    vkDestroyImageView(device, surface->vk_view, NULL);
+    surface->vk_view = VK_NULL_HANDLE;
+    vkDestroyImage(device, surface->vk_image, NULL);
+    surface->vk_image = VK_NULL_HANDLE;
     // TODO destroy framebuffer?
 }
 

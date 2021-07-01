@@ -61,7 +61,6 @@ typedef struct VirtualGfxConsole {
 #endif
 #if defined(CONFIG_VULKAN)
     VkInstance vk_instance;
-    QEMUVkPhysicalDevice vk_physical_device;
     QEMUVkDevice vk_device;
     VkSurfaceKHR vk_surface;
     QEMUVkSwapchain vk_swapchain;

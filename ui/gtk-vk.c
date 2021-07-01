@@ -17,9 +17,8 @@
 
 #include "ui/console.h"
 #include "ui/gtk.h"
-#include "ui/egl-helpers.h"
 #include "ui/vulkan-helpers.h"
-#include "ui/shader.h"
+#include "ui/vulkan-shader.h"
 
 #include "sysemu/sysemu.h"
 
@@ -35,7 +34,7 @@ static void gtk_vk_set_scanout_mode(VirtualConsole *vc, bool scanout)
         if (vc->gfx.surface) {
             // TODO destroy create vk texture (or framebuffer?)
             surface_vk_destroy_texture(vc->gfx.vk_device.handle, vc->gfx.ds);
-            surface_vk_create_texture(vc->gfx.vk_device, vc->gfx.vk_swapchain, vc->gfx.ds);
+            surface_vk_create_texture(vc->gfx.vk_device, vc->gfx.ds);
         }
     }
 }
@@ -59,9 +58,9 @@ void gd_vk_init(VirtualConsole *vc)
 
     vc->gfx.vk_instance = vk_create_instance();
     vc->gfx.vk_surface = qemu_vk_init_surface_x11(vc->gfx.vk_instance, dpy, x11_window);
-    vc->gfx.vk_physical_device = vk_get_physical_device(vc->gfx.vk_instance, vc->gfx.vk_surface);
-    vc->gfx.vk_device = vk_create_device(vc->gfx.vk_instance, vc->gfx.vk_physical_device);
-    vc->gfx.vk_swapchain = vk_create_swapchain(vc->gfx.vk_physical_device, vc->gfx.vk_device.handle, vc->gfx.vk_surface);
+    QEMUVkPhysicalDevice physical_device = vk_get_physical_device(vc->gfx.vk_instance, vc->gfx.vk_surface);
+    vc->gfx.vk_device = vk_create_device(vc->gfx.vk_instance, physical_device);
+    vc->gfx.vk_swapchain = vk_create_swapchain(vc->gfx.vk_device.physical_device, vc->gfx.vk_device.handle, vc->gfx.vk_surface);
 
     assert(vc->gfx.vk_surface);
 }
@@ -138,9 +137,9 @@ void gd_vk_refresh(DisplayChangeListener *dcl)
         if (!vc->gfx.vk_surface) {
             return;
         }
-        vc->gfx.vks = qemu_vk_init_shader(vc->gfx.vk_device.handle);
+        vc->gfx.vks = qemu_vk_init_shader(vc->gfx.vk_device.handle, vc->gfx.vk_swapchain.format);
         if (vc->gfx.ds) {
-           surface_vk_create_texture(vc->gfx.vk_device, vc->gfx.vk_swapchain, vc->gfx.ds);
+           surface_vk_create_texture(vc->gfx.vk_device, vc->gfx.ds);
         }
     }
 
@@ -151,7 +150,6 @@ void gd_vk_refresh(DisplayChangeListener *dcl)
         gtk_vk_set_scanout_mode(vc, false);
         gd_vk_draw(vc);
     }
-    
 }
 
 void gd_vk_switch(DisplayChangeListener *dcl,
@@ -171,7 +169,7 @@ void gd_vk_switch(DisplayChangeListener *dcl,
     surface_vk_destroy_texture(vc->gfx.vk_device.handle, vc->gfx.ds);
     vc->gfx.ds = surface;
     if (vc->gfx.vks) {
-        surface_vk_create_texture(vc->gfx.vk_device, vc->gfx.vk_swapchain, vc->gfx.ds);
+        surface_vk_create_texture(vc->gfx.vk_device, vc->gfx.ds);
     }
 
     if (resized) {
@@ -275,20 +273,17 @@ void gd_vk_scanout_flush(DisplayChangeListener *dcl,
     int ww, wh;
 
     if (!vc->gfx.scanout_mode) {
-        return;
+        return; // Scanout disabled
     }
 
-    if (vc->gfx.guest_vk_fb.framebuffer == VK_NULL_HANDLE) {
-        return;
+    if (!vc->gfx.guest_vk_fb.framebuffers) {
+        return; // Nothing to blit
     }
-
-    //eglMakeCurrent(qemu_egl_display, vc->gfx.esurface,
-    //               vc->gfx.esurface, vc->gfx.ectx);
 
     window = gtk_widget_get_window(vc->gfx.drawing_area);
     ww = gdk_window_get_width(window);
     wh = gdk_window_get_height(window);
-    vk_fb_setup_default(&vc->gfx.win_fb, ww, wh);
+    vk_fb_setup_default(vc->gfx.vk_device.handle, vc->gfx.vk_swapchain, vc->gfx.vks->texture_blit_render_pass, &vc->gfx.win_vk_fb, ww, wh);
     // TODO acquire next image?
 
     if (vc->gfx.cursor_fb.texture) {
