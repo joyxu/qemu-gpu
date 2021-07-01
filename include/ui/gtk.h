@@ -61,10 +61,10 @@ typedef struct VirtualGfxConsole {
 #endif
 #if defined(CONFIG_VULKAN)
     VkInstance vk_instance;
-    VkPhysicalDevice vk_physical_device;
-    VkDevice vk_device;
+    QEMUVkPhysicalDevice vk_physical_device;
+    QEMUVkDevice vk_device;
     VkSurfaceKHR vk_surface;
-    VkSwapchainKHR vk_swapchain;
+    QEMUVkSwapchain vk_swapchain;
     QEMUVulkanShader *vks;
     vulkan_fb guest_vk_fb;
     vulkan_fb win_vk_fb;

@@ -6,7 +6,39 @@
 #include <vulkan/vulkan_core.h>
 #include <stdbool.h>
 
-#include "ui/vulkan-context.h"
+typedef struct QEMUVkQueueFamilyIndices {
+    int32_t graphics;
+    int32_t present;
+} QEMUVkQueueFamilyIndices;
+
+
+typedef struct QEMUVkPhysicalDevice {
+    VkPhysicalDevice handle;
+    QEMUVkQueueFamilyIndices queue_family_indices;
+} QEMUVkPhysicalDevice;
+
+
+typedef struct QEMUVkDevice {
+    VkDevice handle;
+    VkQueue graphics_queue;
+    VkQueue present_queue;
+} QEMUVkDevice;
+
+typedef struct QEMUVkSwapchain {
+    VkSwapchainKHR handle;
+    VkFormat format;
+    VkExtent2D extent;
+    uint32_t image_count;
+    VkImage *images;
+} QEMUVkSwapchain;
+
+typedef struct QEMUVulkanContext {
+    VkInstance instance;
+    QEMUVkPhysicalDevice physical_device;
+    QEMUVkDevice device;
+    VkSurfaceKHR surface;
+    QEMUVkSwapchain swapchain;
+} QEMUVulkanContext;
 
 typedef struct vulkan_texture
 {
@@ -29,11 +61,11 @@ void vk_fb_setup_new_tex(VkDevice device, vulkan_fb *fb, int width, int height);
 void vk_fb_destroy(VkDevice device, vulkan_fb *fb);
 
 VkInstance vk_create_instance(void);
-VkPhysicalDevice vk_create_physical_device(VkInstance i, VkSurfaceKHR s);
-VkDevice vk_create_device(VkInstance i, VkPhysicalDevice pd);
-VkSwapchainKHR vk_create_swapchain(VkPhysicalDevice pd, VkDevice d, VkSurfaceKHR s);
+QEMUVkPhysicalDevice vk_get_physical_device(VkInstance i, VkSurfaceKHR s);
+QEMUVkDevice vk_create_device(VkInstance i, QEMUVkPhysicalDevice pd);
+QEMUVkSwapchain vk_create_swapchain(QEMUVkPhysicalDevice pd, VkDevice d, VkSurfaceKHR s);
 
-VkDevice vk_init(void);
+QEMUVkDevice vk_init(void);
 
 VkSurfaceKHR qemu_vk_init_surface_x11(VkInstance instance, Display *dpy, Window w);
 

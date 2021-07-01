@@ -188,7 +188,7 @@ static void early_vk_headless_init(DisplayOptions *opts)
 
 static void vk_headless_init(DisplayState *ds, DisplayOptions *opts)
 {
-    VkDevice device;
+    QEMUVkDevice device;
     QemuConsole *con;
     vulkan_dpy *vdpy;
     int idx;
@@ -216,7 +216,7 @@ static void vk_headless_init(DisplayState *ds, DisplayOptions *opts)
         vdpy = g_new0(vulkan_dpy, 1);
         vdpy->dcl.con = con;
         vdpy->dcl.ops = &vulkan_ops;
-        vdpy->device = device; // TODO different device for each display?
+        vdpy->device = device.handle; // TODO different device for each display?
         vdpy->vks = qemu_vk_init_shader(vdpy->device);
         register_displaychangelistener(&vdpy->dcl);
     }

@@ -15,6 +15,7 @@
 #ifdef CONFIG_VULKAN
 # include <vulkan/vulkan_core.h>
 # include "ui/vulkan-shader.h"
+# include "ui/vulkan-helpers.h"
 #endif
 
 /* keyboard/mouse support */
@@ -461,8 +462,8 @@ void surface_gl_setup_viewport(QemuGLShader *gls,
 /* console-vk.c */
 #ifdef CONFIG_VULKAN
 bool console_vk_check_format(pixman_format_code_t format);
-void surface_vk_create_texture(VkDevice device,
-                               VkSurfaceKHR vk_surface,
+void surface_vk_create_texture(QEMUVkDevice device,
+                               QEMUVkSwapchain swapchain,
                                DisplaySurface *surface);
 void surface_vk_update_texture(VkCommandBuffer cmdbuf,
                                QEMUVulkanShader *vks,

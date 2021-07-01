@@ -256,7 +256,8 @@ VkInstance vk_create_instance(void)
     return instance;
 }
 
-static bool device_suitable(VkPhysicalDevice physical_device, VkSurfaceKHR surface)
+/// Finds the graphics and present family indices
+static QEMUVkQueueFamilyIndices get_queue_family_indices(VkPhysicalDevice physical_device, VkSurfaceKHR surface)
 {
     uint32_t queue_family_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, NULL);
@@ -264,31 +265,37 @@ static bool device_suitable(VkPhysicalDevice physical_device, VkSurfaceKHR surfa
     VkQueueFamilyProperties *queue_families = g_new(VkQueueFamilyProperties, queue_family_count);
     vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_families);
 
-    // Find the graphics family
-    int32_t graphics_family_index = -1;
-    int32_t present_family_index = -1;
+    QEMUVkQueueFamilyIndices indices = {
+        .graphics = -1,
+        .present = -1,
+    };
 
     for (uint32_t i = 0; i < queue_family_count; ++i) {
         if (queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-            graphics_family_index = (int32_t)i;
+            indices.graphics = (int32_t)i;
         }
 
         VkBool32 present_support = false;
         vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, i, surface, &present_support);
         if (present_support) {
-            present_family_index = (int32_t)i;
+            indices.present = (int32_t)i;
         }
 
-        if (graphics_family_index >= 0 && present_family_index >= 0) {
+        if (indices.graphics >= 0 && indices.present >= 0) {
             break;
         }
     }
 
     g_free(queue_families);
-    return graphics_family_index >= 0 && present_family_index >= 0;
+    return indices;
 }
 
-VkPhysicalDevice vk_create_physical_device(VkInstance instance, VkSurfaceKHR surface)
+bool support_graphics_and_present(QEMUVkQueueFamilyIndices indices)
+{
+    return indices.graphics >= 0 && indices.present >= 0;
+}
+
+QEMUVkPhysicalDevice vk_get_physical_device(VkInstance instance, VkSurfaceKHR surface)
 {
     uint32_t device_count = 0;
     VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, NULL));
@@ -296,44 +303,55 @@ VkPhysicalDevice vk_create_physical_device(VkInstance instance, VkSurfaceKHR sur
     VkPhysicalDevice *physical_devices = g_new(VkPhysicalDevice, device_count);
     VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, physical_devices));
 
-    VkPhysicalDevice physical_device = VK_NULL_HANDLE;
+    QEMUVkPhysicalDevice physical_device = {
+        .handle = VK_NULL_HANDLE,
+        .queue_family_indices = {
+            .graphics = -1,
+            .present = -1,
+        }
+    };
+
     for (uint32_t i = 0; i < device_count; ++i) {
-        if (device_suitable(physical_devices[i], surface)) {
-            physical_device = physical_devices[i];
+        physical_device.queue_family_indices = get_queue_family_indices(physical_devices[i], surface);
+        if (support_graphics_and_present(physical_device.queue_family_indices)) {
+            physical_device.handle = physical_devices[i];
             break;
         }
     }
 
     g_free(physical_devices);
-    g_assert(physical_device != VK_NULL_HANDLE);
+    g_assert(physical_device.handle != VK_NULL_HANDLE);
     return physical_device;
 }
 
-VkDevice vk_create_device(VkInstance instance, VkPhysicalDevice physical_device)
+QEMUVkDevice vk_create_device(VkInstance instance, QEMUVkPhysicalDevice physical_device)
 {
     VkPhysicalDeviceProperties device_properties;
-    vkGetPhysicalDeviceProperties(physical_device, &device_properties);
+    vkGetPhysicalDeviceProperties(physical_device.handle, &device_properties);
     g_print("Bringing up Vulkan on %s\n", device_properties.deviceName);
+    
+    const float default_queue_priority = 1.0f;
 
-    // Request a single graphics queue
-    uint32_t queue_family_index = 0;
-    const float default_queue_priority = 0.0f;
-    VkDeviceQueueCreateInfo queue_create_info = {};
-    uint32_t queue_family_count;
-    vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, NULL);
-    VkQueueFamilyProperties *queue_family_properties = g_new(VkQueueFamilyProperties, queue_family_count);
-    vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_family_properties);
-    for (uint32_t i = 0; i < queue_family_count; i++)
-    {
-        if (queue_family_properties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
-        {
-            queue_family_index = i;
-            queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-            queue_create_info.queueFamilyIndex = i;
-            queue_create_info.queueCount = 1;
-            queue_create_info.pQueuePriorities = &default_queue_priority;
-            break;
-        }
+    uint32_t queue_count =
+        physical_device.queue_family_indices.graphics == physical_device.queue_family_indices.present ?
+        1 : 2;
+
+    VkDeviceQueueCreateInfo *queue_create_infos = g_new(VkDeviceQueueCreateInfo, queue_count);
+
+    queue_create_infos[0] = (VkDeviceQueueCreateInfo){
+        .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+        .queueFamilyIndex = physical_device.queue_family_indices.graphics,
+        .queueCount = 1,
+        .pQueuePriorities = &default_queue_priority
+    };
+
+    if (queue_count > 1) {
+        queue_create_infos[1] = (VkDeviceQueueCreateInfo){
+            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            .queueFamilyIndex = physical_device.queue_family_indices.present,
+            .queueCount = 1,
+            .pQueuePriorities = &default_queue_priority
+        };
     }
 
     const char** extension_names[] = {
@@ -342,24 +360,34 @@ VkDevice vk_create_device(VkInstance instance, VkPhysicalDevice physical_device)
 
     VkDeviceCreateInfo device_create_info = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .queueCreateInfoCount = 1,
-        .pQueueCreateInfos = &queue_create_info,
+        .queueCreateInfoCount = queue_count,
+        .pQueueCreateInfos = queue_create_infos,
         .enabledExtensionCount = 1,
         .ppEnabledExtensionNames = extension_names,
     };
 
-    VkDevice device = VK_NULL_HANDLE;
+    QEMUVkDevice device = {
+        .handle = VK_NULL_HANDLE,
+        .graphics_queue = VK_NULL_HANDLE,
+        .present_queue = VK_NULL_HANDLE,
+    };
 
-    VK_CHECK(vkCreateDevice(physical_device, &device_create_info, NULL, &device));
+    VK_CHECK(vkCreateDevice(physical_device.handle, &device_create_info, NULL, &device));
+
+    g_free(queue_create_infos);
+    g_assert(device.handle != VK_NULL_HANDLE);
+
+    vkGetDeviceQueue(device.handle, physical_device.queue_family_indices.graphics, 0, &device.graphics_queue);
+    vkGetDeviceQueue(device.handle, physical_device.queue_family_indices.present, 0, &device.present_queue);
 
     return device;
 }
 
 // TODO: What is this function used for?
-VkDevice vk_init(void)
+QEMUVkDevice vk_init(void)
 {
     VkInstance instance = vk_create_instance();
-    VkPhysicalDevice physical_device = vk_create_physical_device(instance, VK_NULL_HANDLE);
+    QEMUVkPhysicalDevice physical_device = vk_get_physical_device(instance, VK_NULL_HANDLE);
     return vk_create_device(instance, physical_device);
 }
 
@@ -517,11 +545,9 @@ static VkPresentModeKHR get_swapchain_present_mode(VkPhysicalDevice physical_dev
     return present_mode;
 }
 
-VkSwapchainKHR vk_create_swapchain(VkPhysicalDevice physical_device, VkDevice device, VkSurfaceKHR surface) {
-    VkSwapchainKHR swapchain = VK_NULL_HANDLE;
-
+QEMUVkSwapchain vk_create_swapchain(QEMUVkPhysicalDevice physical_device, VkDevice device, VkSurfaceKHR surface) {
     VkSurfaceCapabilitiesKHR capabilities = {};
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, surface, &capabilities);
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device.handle, surface, &capabilities);
 
     VkExtent2D extent = get_swapchain_extent(&capabilities);
     uint32_t image_count = capabilities.minImageCount + 1;
@@ -529,8 +555,13 @@ VkSwapchainKHR vk_create_swapchain(VkPhysicalDevice physical_device, VkDevice de
         image_count = capabilities.maxImageCount;
     }
 
-    VkSurfaceFormatKHR format = get_swapchain_format(physical_device, surface);
-    VkPresentModeKHR present_mode = get_swapchain_present_mode(physical_device, surface);
+    VkSurfaceFormatKHR format = get_swapchain_format(physical_device.handle, surface);
+    VkPresentModeKHR present_mode = get_swapchain_present_mode(physical_device.handle, surface);
+
+    VkSharingMode image_sharing_mode =
+        physical_device.queue_family_indices.graphics == physical_device.queue_family_indices.present
+        ? VK_SHARING_MODE_EXCLUSIVE
+        : VK_SHARING_MODE_CONCURRENT;
 
     VkSwapchainCreateInfoKHR swapchain_create_info = {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
@@ -541,8 +572,7 @@ VkSwapchainKHR vk_create_swapchain(VkPhysicalDevice physical_device, VkDevice de
         .imageExtent = extent,
         .imageArrayLayers = 1,
         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-        // TODO unless we have two different queues for graphics and presentation
-        .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .imageSharingMode = image_sharing_mode,
         .preTransform = capabilities.currentTransform,
         .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
         .presentMode = present_mode,
@@ -550,7 +580,21 @@ VkSwapchainKHR vk_create_swapchain(VkPhysicalDevice physical_device, VkDevice de
         // TODO old swapchain?
     };
 
-    VK_CHECK(vkCreateSwapchainKHR(device, &swapchain_create_info, NULL, &swapchain));
+    QEMUVkSwapchain swapchain = {
+        .handle = VK_NULL_HANDLE,
+        .format = format.format,
+        .extent = extent,
+        .image_count = 0,
+        .images = NULL,
+    };
+
+    VK_CHECK(vkCreateSwapchainKHR(device, &swapchain_create_info, NULL, &swapchain.handle));
+    g_assert(swapchain.handle != VK_NULL_HANDLE);
+
+    vkGetSwapchainImagesKHR(device, swapchain.handle, &swapchain.image_count, NULL);
+    g_assert(swapchain.image_count > 0);
+    swapchain.images = g_new(VkImage, swapchain.image_count);
+    vkGetSwapchainImagesKHR(device, swapchain.handle, &swapchain.image_count, swapchain.images);
 
     return swapchain;
 }
@@ -560,7 +604,7 @@ QEMUVulkanContext vk_create_context(void)
     QEMUVulkanContext ctx = {};
 
     ctx.instance = vk_create_instance();
-    ctx.physical_device = vk_create_physical_device(ctx.instance, VK_NULL_HANDLE);
+    ctx.physical_device = vk_get_physical_device(ctx.instance, VK_NULL_HANDLE);
     ctx.device = vk_create_device(ctx.instance, ctx.physical_device);
 
     return ctx;

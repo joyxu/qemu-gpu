@@ -26,7 +26,6 @@
  */
 #include "qemu/osdep.h"
 #include "ui/console.h"
-#include "ui/vulkan-shader.h"
 
 #define VK_CHECK(res) g_assert(res == VK_SUCCESS)
 
@@ -45,10 +44,13 @@ bool console_vk_check_format(pixman_format_code_t format)
 }
 
 // TODO: Is this the swapchain image?
-void surface_vk_create_texture(VkDevice device,
-                               VkSurfaceKHR vk_surface,
+/// I believe this is a texture created to upload data from the display surface
+/// This texture will probably be rendered later with the blit pipelines.
+void surface_vk_create_texture(QEMUVkDevice device,
+                               QEMUVkSwapchain swapchain,
                                DisplaySurface *surface)
 {
+    // TODO: what about the format here?
     switch (surface->format) {
     case PIXMAN_BE_b8g8r8x8:
     case PIXMAN_BE_b8g8r8a8:
@@ -65,31 +67,13 @@ void surface_vk_create_texture(VkDevice device,
         g_assert_not_reached();
     }
 
-    VkImageCreateInfo image_create_info = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType = VK_IMAGE_TYPE_2D,
-        .format = surface->vkformat,
-        .extent = {
-            .width = surface_width(surface),
-            .height = surface_height(surface),
-            .depth = 1,
-        },
-        .mipLevels = 1,
-        .arrayLayers = 1,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
-        .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_SAMPLED_BIT, // TODO: figure out usage
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-    };
-
-    VK_CHECK(vkCreateImage(device, &image_create_info, NULL, &surface->vkimage));
+    // TODO: support multiple swapchain images?
 
     VkImageViewCreateInfo view_create_info = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image = surface->vkimage,
+        .image = swapchain.images[0],
         .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        .format = surface->vkformat,
+        .format = swapchain.format,
         .subresourceRange = {
             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
             .baseMipLevel = 0,
@@ -99,7 +83,7 @@ void surface_vk_create_texture(VkDevice device,
         }
     };
 
-    VK_CHECK(vkCreateImageView(device, &view_create_info, NULL, &surface->vkview));
+    VK_CHECK(vkCreateImageView(device.handle, &view_create_info, NULL, &surface->vkview));
 
     VkSamplerCreateInfo sampler_create_info = {
         .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -107,7 +91,7 @@ void surface_vk_create_texture(VkDevice device,
         .minFilter = VK_FILTER_LINEAR,
     };
 
-    VK_CHECK(vkCreateSampler(device, &sampler_create_info, NULL, &surface->vksampler));
+    VK_CHECK(vkCreateSampler(device.handle, &sampler_create_info, NULL, &surface->vksampler));
 
     // TODO upload data from surface to the image?
     // TODO need a command buffer for a graphics queue
