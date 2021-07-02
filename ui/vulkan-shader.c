@@ -37,7 +37,6 @@
 
 #define VK_CHECK(res) g_assert(res == VK_SUCCESS)
 
-
 /* ---------------------------------------------------------------------- */
 struct QemuVkVertex
 {
@@ -65,26 +64,11 @@ static const struct QemuVkVertex in_position[] = {
     },
 };
 
-static VkBuffer
-qemu_vk_init_texture_blit_vertex_buffer(VkDevice device)
-{
-
-    VkBufferCreateInfo buffer_create_info = {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = sizeof(in_position),
-        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-    };
-
-    VkBuffer buffer;
-    VK_CHECK(vkCreateBuffer(device, &buffer_create_info, NULL, &buffer));
-    return buffer;
-}
-
 void qemu_vk_run_texture_blit(VkCommandBuffer cmdbuf, QEMUVulkanShader *vks, bool flip)
 {
     vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, flip ? vks->texture_blit_flip_pipeline : vks->texture_blit_pipeline);
-    const VkDeviceSize offsets[] = { 0 };
-    vkCmdBindVertexBuffers(cmdbuf, 0, 1, &vks->texture_blit_vertex_buffer, offsets);
+    const VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmdbuf, 0, 1, &vks->texture_blit_vertex_buffer.handle, offsets);
     vkCmdDraw(cmdbuf, 4, 1, 0, 0);
 }
 
@@ -103,7 +87,7 @@ static VkShaderModule qemu_vk_create_compile_shader(VkDevice device, const char 
 }
 
 // layout (binding = 0) uniform sampler2D image;
-static VkDescriptorSetLayout qemu_vk_create_set_layout(VkDevice device)
+static VkDescriptorSetLayout qemu_vk_create_desc_set_layout(VkDevice device)
 {
     VkDescriptorSetLayoutBinding layout_binding = {
         .binding = 0,
@@ -123,10 +107,8 @@ static VkDescriptorSetLayout qemu_vk_create_set_layout(VkDevice device)
     return layout;
 }
 
-static VkPipelineLayout qemu_vk_create_pipeline_layout(VkDevice device)
+static VkPipelineLayout qemu_vk_create_pipeline_layout(VkDevice device, VkDescriptorSetLayout set_layout)
 {
-    VkDescriptorSetLayout set_layout = qemu_vk_create_set_layout(device);
-
     VkPipelineLayoutCreateInfo pipeline_layout_create_info = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = 1,
@@ -185,13 +167,14 @@ static VkPipeline qemu_vk_create_graphics_pipeline(VkDevice device, VkShaderModu
 
     // TODO use parameters instead of magic numbers
     VkExtent2D extent = {
-        .width = 1024,
-        .height = 768,
+        .width = 2880,
+        .height = 1600,
     };
 
     VkViewport viewport = {
         .width = extent.width,
         .height = extent.height,
+        .minDepth = 0.0f,
         .maxDepth = 1.0f,
     };
 
@@ -210,8 +193,8 @@ static VkPipeline qemu_vk_create_graphics_pipeline(VkDevice device, VkShaderModu
     VkPipelineRasterizationStateCreateInfo rasterizer = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         .lineWidth = 1.0,
-        .cullMode = VK_CULL_MODE_BACK_BIT,
-        .frontFace = VK_FRONT_FACE_CLOCKWISE,
+        .cullMode = VK_CULL_MODE_NONE,
+        .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
     };
 
     VkPipelineMultisampleStateCreateInfo multisampling = {
@@ -230,6 +213,14 @@ static VkPipeline qemu_vk_create_graphics_pipeline(VkDevice device, VkShaderModu
         .pAttachments = &color_blend_attachment,
     };
 
+    VkDynamicState dynamic_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+
+    VkPipelineDynamicStateCreateInfo dynamic_state = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        .dynamicStateCount = 1,
+        .pDynamicStates = dynamic_states,
+    };
+
     VkGraphicsPipelineCreateInfo pipeline_create_info = {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .stageCount = ARRAY_SIZE(shader_stage_info),
@@ -240,6 +231,7 @@ static VkPipeline qemu_vk_create_graphics_pipeline(VkDevice device, VkShaderModu
         .pRasterizationState = &rasterizer,
         .pMultisampleState = &multisampling,
         .pColorBlendState = &color_blending,
+        .pDynamicState = &dynamic_state,
         .layout = pipeline_layout,
         .renderPass = render_pass,
     };
@@ -250,12 +242,12 @@ static VkPipeline qemu_vk_create_graphics_pipeline(VkDevice device, VkShaderModu
 }
 
 static VkPipeline qemu_vk_create_pipeline_from_sources(VkDevice device,
+                                                       VkPipelineLayout pipeline_layout,
                                                        VkRenderPass render_pass,
                                                        const char *vert_src, size_t vert_size,
                                                        const char *frag_src, size_t frag_size)
 {
     VkShaderModule vert_shader, frag_shader;
-    VkPipelineLayout pipeline_layout;
     VkPipeline graphics_pipeline;
 
     vert_shader = qemu_vk_create_compile_shader(device, vert_src, vert_size);
@@ -265,14 +257,10 @@ static VkPipeline qemu_vk_create_pipeline_from_sources(VkDevice device,
         return VK_NULL_HANDLE;
     }
 
-    pipeline_layout = qemu_vk_create_pipeline_layout(device);
-
     graphics_pipeline = qemu_vk_create_graphics_pipeline(device, vert_shader, frag_shader, pipeline_layout, render_pass);
 
     vkDestroyShaderModule(device, vert_shader, NULL);
     vkDestroyShaderModule(device, frag_shader, NULL);
-
-    // TODO destroy or store pipeline_layout?
 
     return graphics_pipeline;
 }
@@ -330,27 +318,35 @@ static VkRenderPass qemu_vk_init_texture_blit_render_pass(VkDevice device, VkFor
 
 /* ---------------------------------------------------------------------- */
 
-QEMUVulkanShader *qemu_vk_init_shader(VkDevice device, VkFormat color_attachment_format)
+QEMUVulkanShader *qemu_vk_init_shader(QEMUVkDevice device, VkFormat color_attachment_format)
 {
     QEMUVulkanShader *vks = g_new0(QEMUVulkanShader, 1);
 
-    vks->texture_blit_render_pass = qemu_vk_init_texture_blit_render_pass(device, color_attachment_format);
+    vks->desc_set_layout = qemu_vk_create_desc_set_layout(device.handle);
+    vks->texture_blit_pipeline_layout = qemu_vk_create_pipeline_layout(device.handle, vks->desc_set_layout);
+    vks->texture_blit_render_pass = qemu_vk_init_texture_blit_render_pass(device.handle, color_attachment_format);
 
     vks->texture_blit_pipeline =
-        qemu_vk_create_pipeline_from_sources(device,
+        qemu_vk_create_pipeline_from_sources(device.handle,
+                                             vks->texture_blit_pipeline_layout,
                                              vks->texture_blit_render_pass,
                                              texture_blit_vert_src, ARRAY_SIZE(texture_blit_vert_src),
                                              texture_blit_frag_src, ARRAY_SIZE(texture_blit_frag_src));
     vks->texture_blit_flip_pipeline =
-        qemu_vk_create_pipeline_from_sources(device,
+        qemu_vk_create_pipeline_from_sources(device.handle,
+                                             vks->texture_blit_pipeline_layout,
                                              vks->texture_blit_render_pass,
                                              texture_blit_flip_vert_src, ARRAY_SIZE(texture_blit_flip_vert_src),
                                              texture_blit_frag_src, ARRAY_SIZE(texture_blit_frag_src));
     g_assert(vks->texture_blit_pipeline != VK_NULL_HANDLE &&
              vks->texture_blit_flip_pipeline != VK_NULL_HANDLE);
 
-    vks->texture_blit_vertex_buffer = qemu_vk_init_texture_blit_vertex_buffer(device);
-    
+    vks->texture_blit_vertex_buffer = vk_create_buffer(device, sizeof(in_position), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    void* data;
+    vkMapMemory(device.handle, vks->texture_blit_vertex_buffer.memory, 0, sizeof(in_position), 0, &data);
+    memcpy(data, in_position, sizeof(in_position));
+    vkUnmapMemory(device.handle, vks->texture_blit_vertex_buffer.memory);
 
     return vks;
 }
@@ -365,7 +361,9 @@ void qemu_vk_fini_shader(VkDevice device, QEMUVulkanShader *vks)
     vkDestroyRenderPass(device, vks->texture_blit_render_pass, NULL);
     vkDestroyPipeline(device, vks->texture_blit_flip_pipeline, NULL);
     vkDestroyPipeline(device, vks->texture_blit_pipeline, NULL);
-    vkDestroyBuffer(device, vks->texture_blit_vertex_buffer, NULL);
+    vk_destroy_buffer(device, vks->texture_blit_vertex_buffer);
+    vkDestroyPipelineLayout(device, vks->texture_blit_pipeline_layout, NULL);
+    vkDestroyDescriptorSetLayout(device, vks->desc_set_layout, NULL);
 
     g_free(vks);
 }

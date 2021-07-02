@@ -24,6 +24,8 @@
 #include <vulkan/vulkan_wayland.h>
 #include <vulkan/vulkan_xlib.h>
 
+#include "ui/vulkan-shader.h"
+
 #define VK_CHECK(res) g_assert(res == VK_SUCCESS)
 
 // TODO where do we destroy these?
@@ -64,7 +66,8 @@ void vk_fb_destroy(VkDevice device, vulkan_fb *fb)
 
     vk_texture_destroy(device, &fb->texture);
 
-    for (uint32_t i = 0; i < fb->framebuffer_count; ++i) {
+    for (uint32_t i = 0; i < fb->framebuffer_count; ++i)
+    {
         vkDestroyFramebuffer(device, fb->framebuffers[i], NULL);
         fb->framebuffers[i] = VK_NULL_HANDLE;
     }
@@ -78,11 +81,13 @@ void vk_fb_setup_default(VkDevice device, QEMUVkSwapchain swapchain, VkRenderPas
 {
     //g_assert(width == swapchain.extent.width && height == swapchain.extent.height);
 
-    if (fb->framebuffers != NULL) {
+    /*
+    if (fb->framebuffers != NULL)
+    {
         return; // TODO: already setup?
     }
 
-    fb->texture = (vulkan_texture) {
+    fb->texture = (vulkan_texture){
         .width = swapchain.extent.width,
         .height = swapchain.extent.height,
         .image = VK_NULL_HANDLE,
@@ -94,8 +99,9 @@ void vk_fb_setup_default(VkDevice device, QEMUVkSwapchain swapchain, VkRenderPas
     fb->framebuffer_count = swapchain.image_count;
     fb->framebuffers = g_new(VkFramebuffer, fb->framebuffer_count);
 
-    for (uint32_t i = 0; i < swapchain.image_count; ++i) {
-        VkImageView attachments[] = { swapchain.views[i] };
+    for (uint32_t i = 0; i < swapchain.image_count; ++i)
+    {
+        VkImageView attachments[] = {swapchain.views[i]};
         VkFramebufferCreateInfo framebuffer_create_info = {
             .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
             .renderPass = render_pass,
@@ -108,6 +114,7 @@ void vk_fb_setup_default(VkDevice device, QEMUVkSwapchain swapchain, VkRenderPas
 
         VK_CHECK(vkCreateFramebuffer(device, &framebuffer_create_info, NULL, &fb->framebuffers[i]));
     }
+    */
 }
 
 void vk_fb_setup_for_tex(VkDevice device, vulkan_fb *fb, vulkan_texture texture)
@@ -208,9 +215,9 @@ VkInstance vk_create_instance(void)
         .apiVersion = VK_API_VERSION_1_0,
     };
 
-    const char* extension_names[] = {
+    const char *extension_names[] = {
         VK_KHR_SURFACE_EXTENSION_NAME,
-        VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
+        //VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
         VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
         VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
     };
@@ -218,11 +225,11 @@ VkInstance vk_create_instance(void)
     VkInstanceCreateInfo instance_create_info = {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pApplicationInfo = &app_info,
-        .enabledExtensionCount = 3, // exclude debug report for the moment
+        .enabledExtensionCount = 2, // exclude debug report for the moment
         .ppEnabledExtensionNames = extension_names,
     };
 
-    const char *validation_layers[] = { "VK_LAYER_KHRONOS_validation"};
+    const char *validation_layers[] = {"VK_LAYER_KHRONOS_validation"};
     uint32_t layer_count = 1;
 
     // Check layers availability
@@ -301,18 +308,22 @@ static QEMUVkQueueFamilyIndices get_queue_family_indices(VkPhysicalDevice physic
         .present = -1,
     };
 
-    for (uint32_t i = 0; i < queue_family_count; ++i) {
-        if (queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+    for (uint32_t i = 0; i < queue_family_count; ++i)
+    {
+        if (queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
+        {
             indices.graphics = (int32_t)i;
         }
 
         VkBool32 present_support = false;
         vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, i, surface, &present_support);
-        if (present_support) {
+        if (present_support)
+        {
             indices.present = (int32_t)i;
         }
 
-        if (indices.graphics >= 0 && indices.present >= 0) {
+        if (indices.graphics >= 0 && indices.present >= 0)
+        {
             break;
         }
     }
@@ -321,7 +332,7 @@ static QEMUVkQueueFamilyIndices get_queue_family_indices(VkPhysicalDevice physic
     return indices;
 }
 
-bool support_graphics_and_present(QEMUVkQueueFamilyIndices indices)
+static bool support_graphics_and_present(QEMUVkQueueFamilyIndices indices)
 {
     return indices.graphics >= 0 && indices.present >= 0;
 }
@@ -335,16 +346,18 @@ QEMUVkPhysicalDevice vk_get_physical_device(VkInstance instance, VkSurfaceKHR su
     VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, physical_devices));
 
     QEMUVkPhysicalDevice physical_device = {
+        .surface = surface,
         .handle = VK_NULL_HANDLE,
         .queue_family_indices = {
             .graphics = -1,
             .present = -1,
-        }
-    };
+        }};
 
-    for (uint32_t i = 0; i < device_count; ++i) {
+    for (uint32_t i = 0; i < device_count; ++i)
+    {
         physical_device.queue_family_indices = get_queue_family_indices(physical_devices[i], surface);
-        if (support_graphics_and_present(physical_device.queue_family_indices)) {
+        if (support_graphics_and_present(physical_device.queue_family_indices))
+        {
             physical_device.handle = physical_devices[i];
             break;
         }
@@ -357,17 +370,30 @@ QEMUVkPhysicalDevice vk_get_physical_device(VkInstance instance, VkSurfaceKHR su
     return physical_device;
 }
 
+static VkCommandBuffer vk_allocate_command_buffer(VkDevice device, VkCommandPool cmd_pool)
+{
+    VkCommandBufferAllocateInfo command_buffer_alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = cmd_pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+
+    VkCommandBuffer cmd_buf;
+    VK_CHECK(vkAllocateCommandBuffers(device, &command_buffer_alloc_info, &cmd_buf));
+    return cmd_buf;
+}
+
 QEMUVkDevice vk_create_device(VkInstance instance, QEMUVkPhysicalDevice physical_device)
 {
     VkPhysicalDeviceProperties device_properties;
     vkGetPhysicalDeviceProperties(physical_device.handle, &device_properties);
     g_print("Bringing up Vulkan on %s\n", device_properties.deviceName);
-    
+
     const float default_queue_priority = 1.0f;
 
     uint32_t queue_count =
-        physical_device.queue_family_indices.graphics == physical_device.queue_family_indices.present ?
-        1 : 2;
+        physical_device.queue_family_indices.graphics == physical_device.queue_family_indices.present ? 1 : 2;
 
     VkDeviceQueueCreateInfo *queue_create_infos = g_new(VkDeviceQueueCreateInfo, queue_count);
 
@@ -375,21 +401,19 @@ QEMUVkDevice vk_create_device(VkInstance instance, QEMUVkPhysicalDevice physical
         .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
         .queueFamilyIndex = physical_device.queue_family_indices.graphics,
         .queueCount = 1,
-        .pQueuePriorities = &default_queue_priority
-    };
+        .pQueuePriorities = &default_queue_priority};
 
-    if (queue_count > 1) {
+    if (queue_count > 1)
+    {
         queue_create_infos[1] = (VkDeviceQueueCreateInfo){
             .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
             .queueFamilyIndex = physical_device.queue_family_indices.present,
             .queueCount = 1,
-            .pQueuePriorities = &default_queue_priority
-        };
+            .pQueuePriorities = &default_queue_priority};
     }
 
-    const char** extension_names[] = {
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME
-    };
+    const char *extension_names[] = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
     VkDeviceCreateInfo device_create_info = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
@@ -418,19 +442,12 @@ QEMUVkDevice vk_create_device(VkInstance instance, QEMUVkPhysicalDevice physical
     VkCommandPoolCreateInfo command_pool_create_info = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
         .queueFamilyIndex = physical_device.queue_family_indices.graphics,
+        .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
     };
 
     VK_CHECK(vkCreateCommandPool(device.handle, &command_pool_create_info, NULL, &device.command_pool));
 
-    // General command buffer
-    VkCommandBufferAllocateInfo command_buffer_alloc_info = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = device.command_pool,
-        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 1,
-    };
-
-    VK_CHECK(vkAllocateCommandBuffers(device.handle, &command_buffer_alloc_info, &device.general_command_buffer));
+    device.general_command_buffer = vk_allocate_command_buffer(device.handle, device.command_pool);
 
     return device;
 }
@@ -443,7 +460,7 @@ QEMUVkDevice vk_init(void)
     return vk_create_device(instance, physical_device);
 }
 
-static VkSurfaceKHR vk_create_wayland_surface(VkInstance instance, struct wl_display* dpy, struct wl_surface* s)
+static VkSurfaceKHR vk_create_wayland_surface(VkInstance instance, struct wl_display *dpy, struct wl_surface *s)
 {
     VkWaylandSurfaceCreateInfoKHR surface_create_info = {
         .sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR,
@@ -457,7 +474,7 @@ static VkSurfaceKHR vk_create_wayland_surface(VkInstance instance, struct wl_dis
     return surface;
 }
 
-VkSurfaceKHR qemu_vk_init_surface_x11(VkInstance instance, Display* dpy, Window w)
+VkSurfaceKHR qemu_vk_init_surface_x11(VkInstance instance, Display *dpy, Window w)
 {
     VkXlibSurfaceCreateInfoKHR surface_create_info = {
         .sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR,
@@ -477,9 +494,9 @@ static VkSurfaceKHR vk_create_x11_surface(VkInstance instance, Display *dpy, Win
 }
 
 static int qemu_vk_init_dpy(VkDisplayKHR dpy,
-                             //EGLenum platform,
-                             int platform,
-                             VkDisplayModeKHR mode)
+                            //EGLenum platform,
+                            int platform,
+                            VkDisplayModeKHR mode)
 {
     /*
     static const EGLint conf_att_core[] = {
@@ -536,6 +553,7 @@ static int qemu_vk_init_dpy(VkDisplayKHR dpy,
     qemu_egl_mode = gles ? DISPLAYGL_MODE_ES : DISPLAYGL_MODE_CORE;
     return 0;
     */
+    return 0;
 }
 
 /// Initializes Vulkan for a wayland display
@@ -543,6 +561,7 @@ int qemu_vk_init_dpy_wayland(struct wl_display *dpy, struct wl_surface *s)
 {
     VkInstance instance = vk_create_instance();
     vk_create_wayland_surface(instance, dpy, s);
+    return 0;
 }
 
 /// Initializes Vulkan for an X11 display
@@ -550,24 +569,29 @@ int qemu_vk_init_dpy_x11(Display *dpy, Window w)
 {
     VkInstance instance = vk_create_instance();
     vk_create_x11_surface(instance, dpy, w);
+    return 0;
 }
 
-static VkExtent2D get_swapchain_extent(VkSurfaceCapabilitiesKHR *capabilities) {
+static VkExtent2D get_swapchain_extent(VkSurfaceCapabilitiesKHR *capabilities)
+{
     g_assert(capabilities->currentExtent.width != UINT32_MAX);
     return capabilities->currentExtent;
 }
 
-static VkSurfaceFormatKHR get_swapchain_format(VkPhysicalDevice physical_device, VkSurfaceKHR surface) {
+static VkSurfaceFormatKHR get_swapchain_format(QEMUVkPhysicalDevice physical_device)
+{
 
     uint32_t format_count;
     VkSurfaceFormatKHR format = {};
-    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &format_count, NULL));
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device.handle, physical_device.surface, &format_count, NULL));
 
     VkSurfaceFormatKHR *formats = g_new(VkSurfaceFormatKHR, format_count);
-    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &format_count, formats));
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device.handle, physical_device.surface, &format_count, formats));
 
-    for (uint32_t i = 0; i < format_count; ++i) {
-        if (formats[i].format == VK_FORMAT_B8G8R8A8_SRGB && formats[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+    for (uint32_t i = 0; i < format_count; ++i)
+    {
+        if (formats[i].format == VK_FORMAT_B8G8R8A8_SRGB && formats[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+        {
             format = formats[i];
             break;
         }
@@ -578,16 +602,19 @@ static VkSurfaceFormatKHR get_swapchain_format(VkPhysicalDevice physical_device,
     return format;
 }
 
-static VkPresentModeKHR get_swapchain_present_mode(VkPhysicalDevice physical_device, VkSurfaceKHR surface) {
+static VkPresentModeKHR get_swapchain_present_mode(QEMUVkPhysicalDevice physical_device)
+{
     uint32_t present_count;
     VkPresentModeKHR present_mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
-    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device, surface, &present_count, NULL));
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device.handle, physical_device.surface, &present_count, NULL));
 
     VkPresentModeKHR *present_modes = g_new(VkPresentModeKHR, present_count);
-    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device, surface, &present_count, present_modes));
+    VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device.handle, physical_device.surface, &present_count, present_modes));
 
-    for (uint32_t i = 0; i < present_count; ++i) {
-        if (present_modes[i] == VK_PRESENT_MODE_FIFO_KHR) {
+    for (uint32_t i = 0; i < present_count; ++i)
+    {
+        if (present_modes[i] == VK_PRESENT_MODE_FIFO_KHR)
+        {
             present_mode = present_modes[i];
             break;
         }
@@ -597,27 +624,29 @@ static VkPresentModeKHR get_swapchain_present_mode(VkPhysicalDevice physical_dev
     return present_mode;
 }
 
-QEMUVkSwapchain vk_create_swapchain(QEMUVkPhysicalDevice physical_device, VkDevice device, VkSurfaceKHR surface) {
+QEMUVkSwapchain vk_create_swapchain(QEMUVkDevice device, VkSwapchainKHR old_swapchain)
+{
     VkSurfaceCapabilitiesKHR capabilities = {};
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device.handle, surface, &capabilities);
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device.physical_device.handle, device.physical_device.surface, &capabilities);
 
     VkExtent2D extent = get_swapchain_extent(&capabilities);
-    uint32_t image_count = capabilities.minImageCount + 1;
-    if (capabilities.maxImageCount > 0 && image_count > capabilities.maxImageCount) {
+    uint32_t image_count = capabilities.minImageCount;
+    if (capabilities.maxImageCount > 0 && image_count > capabilities.maxImageCount)
+    {
         image_count = capabilities.maxImageCount;
     }
 
-    VkSurfaceFormatKHR format = get_swapchain_format(physical_device.handle, surface);
-    VkPresentModeKHR present_mode = get_swapchain_present_mode(physical_device.handle, surface);
+    VkSurfaceFormatKHR format = get_swapchain_format(device.physical_device);
+    VkPresentModeKHR present_mode = get_swapchain_present_mode(device.physical_device);
 
     VkSharingMode image_sharing_mode =
-        physical_device.queue_family_indices.graphics == physical_device.queue_family_indices.present
-        ? VK_SHARING_MODE_EXCLUSIVE
-        : VK_SHARING_MODE_CONCURRENT;
+        device.physical_device.queue_family_indices.graphics == device.physical_device.queue_family_indices.present
+            ? VK_SHARING_MODE_EXCLUSIVE
+            : VK_SHARING_MODE_CONCURRENT;
 
     VkSwapchainCreateInfoKHR swapchain_create_info = {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-        .surface = surface,
+        .surface = device.physical_device.surface,
         .minImageCount = image_count,
         .imageFormat = format.format,
         .imageColorSpace = format.colorSpace,
@@ -629,7 +658,7 @@ QEMUVkSwapchain vk_create_swapchain(QEMUVkPhysicalDevice physical_device, VkDevi
         .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
         .presentMode = present_mode,
         .clipped = VK_TRUE,
-        // TODO old swapchain?
+        .oldSwapchain = old_swapchain,
     };
 
     QEMUVkSwapchain swapchain = {
@@ -640,13 +669,13 @@ QEMUVkSwapchain vk_create_swapchain(QEMUVkPhysicalDevice physical_device, VkDevi
         .images = NULL,
     };
 
-    VK_CHECK(vkCreateSwapchainKHR(device, &swapchain_create_info, NULL, &swapchain.handle));
+    VK_CHECK(vkCreateSwapchainKHR(device.handle, &swapchain_create_info, NULL, &swapchain.handle));
     g_assert(swapchain.handle != VK_NULL_HANDLE);
 
-    vkGetSwapchainImagesKHR(device, swapchain.handle, &swapchain.image_count, NULL);
+    vkGetSwapchainImagesKHR(device.handle, swapchain.handle, &swapchain.image_count, NULL);
     g_assert(swapchain.image_count > 0);
     swapchain.images = g_new(VkImage, swapchain.image_count);
-    vkGetSwapchainImagesKHR(device, swapchain.handle, &swapchain.image_count, swapchain.images);
+    vkGetSwapchainImagesKHR(device.handle, swapchain.handle, &swapchain.image_count, swapchain.images);
 
     swapchain.views = g_new(VkImageView, swapchain.image_count);
 
@@ -659,15 +688,143 @@ QEMUVkSwapchain vk_create_swapchain(QEMUVkPhysicalDevice physical_device, VkDevi
             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
             .levelCount = 1,
             .layerCount = 1,
-        }
-    };
+        }};
 
-    for (uint32_t i = 0; i < swapchain.image_count; ++i) {
+    for (uint32_t i = 0; i < swapchain.image_count; ++i)
+    {
         image_view_create_info.image = swapchain.images[i];
-        VK_CHECK(vkCreateImageView(device, &image_view_create_info, NULL, &swapchain.views[i]));
+        VK_CHECK(vkCreateImageView(device.handle, &image_view_create_info, NULL, &swapchain.views[i]));
     }
 
     return swapchain;
+}
+
+void vk_destroy_swapchain(VkDevice device, QEMUVkSwapchain *swapchain)
+{
+    // TODO: Wait for any frame still rendering
+    vkDeviceWaitIdle(device);
+
+    for (uint32_t i = 0; i < swapchain->image_count; ++i)
+    {
+        vkDestroyImageView(device, swapchain->views[i], NULL);
+    }
+
+    swapchain->image_count = 0;
+
+    g_free(swapchain->views);
+    swapchain->views = NULL;
+
+    g_free(swapchain->images);
+    swapchain->images = NULL;
+
+    vkDestroySwapchainKHR(device, swapchain->handle, NULL);
+    swapchain->handle = VK_NULL_HANDLE;
+}
+
+void vk_swapchain_recreate(QEMUVkDevice device, QEMUVkSwapchain *swapchain)
+{
+    // TODO: Wait for any frame still rendering
+    vkDeviceWaitIdle(device.handle);
+
+    for (uint32_t i = 0; i < swapchain->image_count; ++i)
+    {
+        vkDestroyImageView(device.handle, swapchain->views[i], NULL);
+    }
+
+    g_free(swapchain->views);
+    g_free(swapchain->images);
+
+    *swapchain = vk_create_swapchain(device, swapchain->handle);
+}
+
+VkFramebuffer vk_create_framebuffer(VkDevice device, VkRenderPass render_pass, VkImageView view, uint32_t width, uint32_t height)
+{
+    VkFramebufferCreateInfo framebuffer_create_info = {
+        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+        .renderPass = render_pass,
+        .attachmentCount = 1,
+        .pAttachments = &view,
+        .width = width,
+        .height = height,
+        .layers = 1,
+    };
+
+    VkFramebuffer framebuffer;
+    VK_CHECK(vkCreateFramebuffer(device, &framebuffer_create_info, NULL, &framebuffer));
+    return framebuffer;
+}
+
+static VkDescriptorPool vk_create_descriptor_pool(VkDevice device, uint32_t descriptor_count)
+{
+    // One combined image sampler descriptor for each frame
+    VkDescriptorPoolSize pool_size = {
+        .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = descriptor_count,
+    };
+
+    // TODO verify whether descriptorCount or maxSets should be used exclusively to set
+    // a maximum amount of descriptor sets
+    VkDescriptorPoolCreateInfo descriptor_pool_create_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .poolSizeCount = 1,
+        .pPoolSizes = &pool_size,
+        .maxSets = descriptor_count,
+    };
+
+    VkDescriptorPool descriptor_pool;
+    VK_CHECK(vkCreateDescriptorPool(device, &descriptor_pool_create_info, NULL, &descriptor_pool));
+    return descriptor_pool;
+}
+
+VkDescriptorSet vk_allocate_descriptor_set(VkDevice device, VkDescriptorPool desc_pool, VkDescriptorSetLayout set_layout)
+{
+    VkDescriptorSetAllocateInfo desc_set_alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = desc_pool,
+        .pSetLayouts = &set_layout,
+        .descriptorSetCount = 1,
+    };
+
+    VkDescriptorSet desc_set;
+    VK_CHECK(vkAllocateDescriptorSets(device, &desc_set_alloc_info, &desc_set));
+    return desc_set;
+}
+
+QEMUVkFrames vk_create_frames(QEMUVkDevice device, QEMUVkSwapchain swapchain, QEMUVulkanShader *shader)
+{
+    QEMUVkFrames frames = {
+        .desc_pool = vk_create_descriptor_pool(device.handle, swapchain.image_count),
+        .frame_count = swapchain.image_count,
+        .frame_index = 0,
+        .framebuffers = g_new(VkFramebuffer, swapchain.image_count),
+        .cmd_bufs = g_new(VkCommandBuffer, swapchain.image_count),
+        .desc_sets = g_new(VkDescriptorSet, swapchain.image_count),
+    };
+
+    for (uint32_t i = 0; i < swapchain.image_count; ++i)
+    {
+        frames.framebuffers[i] = vk_create_framebuffer(device.handle, shader->texture_blit_render_pass, swapchain.views[i], swapchain.extent.width, swapchain.extent.height);
+        frames.cmd_bufs[i] = vk_allocate_command_buffer(device.handle, device.command_pool);
+        frames.desc_sets[i] = vk_allocate_descriptor_set(device.handle, frames.desc_pool, shader->desc_set_layout);
+    }
+
+    return frames;
+}
+
+static void vk_destroy_frames(QEMUVkFrames *frames, QEMUVkDevice device)
+{
+    for (uint32_t i = 0; i < frames->frame_count; ++i)
+    {
+        vkFreeDescriptorSets(device.handle, frames->desc_pool, 1, &frames->desc_sets[i]);
+        vkFreeCommandBuffers(device.handle, device.command_pool, 1, &frames->cmd_bufs[i]);
+        vkDestroyFramebuffer(device.handle, frames->framebuffers[i], NULL);
+    }
+
+    vkDestroyDescriptorPool(device.handle, frames->desc_pool, NULL);
+
+    g_free(frames->framebuffers);
+    g_free(frames->cmd_bufs);
+    g_free(frames->desc_sets);
 }
 
 QEMUVulkanContext vk_create_context(void)
@@ -681,11 +838,63 @@ QEMUVulkanContext vk_create_context(void)
     return ctx;
 }
 
-VkCommandBuffer vk_command_buffer_begin(VkCommandBuffer command_buffer, VkCommandBufferUsageFlags flags) {
+void vk_command_buffer_begin(VkCommandBuffer command_buffer, VkCommandBufferUsageFlags flags)
+{
     VkCommandBufferBeginInfo command_buffer_begin_info = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = flags,
     };
 
     VK_CHECK(vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info));
+}
+
+uint32_t get_memory_type_index(QEMUVkPhysicalDevice physical_device,
+                               uint32_t memory_type_filter,
+                               VkMemoryPropertyFlags memory_property_flags)
+{
+    for (uint32_t i = 0; i < physical_device.memory_properties.memoryTypeCount; ++i)
+    {
+        if (memory_type_filter & (1 << i) && ((physical_device.memory_properties.memoryTypes[i].propertyFlags & memory_property_flags) == memory_property_flags))
+        {
+            return i;
+        }
+    }
+
+    g_assert(false);
+    return 0;
+}
+
+QEMUVkBuffer vk_create_buffer(QEMUVkDevice device,
+                              VkDeviceSize size,
+                              VkBufferUsageFlags usage,
+                              VkMemoryPropertyFlags memory_properties)
+{
+    VkBufferCreateInfo buffer_create_info = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = size,
+        .usage = usage,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+
+    QEMUVkBuffer buffer;
+    VK_CHECK(vkCreateBuffer(device.handle, &buffer_create_info, NULL, &buffer.handle));
+
+    VkMemoryRequirements memory_requirements;
+    vkGetBufferMemoryRequirements(device.handle, buffer.handle, &memory_requirements);
+
+    VkMemoryAllocateInfo memory_alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = memory_requirements.size,
+        .memoryTypeIndex = get_memory_type_index(device.physical_device, memory_requirements.memoryTypeBits, memory_properties)};
+
+    VK_CHECK(vkAllocateMemory(device.handle, &memory_alloc_info, NULL, &buffer.memory));
+    VK_CHECK(vkBindBufferMemory(device.handle, buffer.handle, buffer.memory, 0));
+
+    return buffer;
+}
+
+void vk_destroy_buffer(VkDevice device, QEMUVkBuffer buffer)
+{
+    vkDestroyBuffer(device, buffer.handle, NULL);
+    vkFreeMemory(device, buffer.memory, NULL);
 }

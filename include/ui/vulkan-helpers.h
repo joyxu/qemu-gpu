@@ -6,20 +6,22 @@
 #include <vulkan/vulkan_core.h>
 #include <stdbool.h>
 
-typedef struct QEMUVkQueueFamilyIndices {
+typedef struct QEMUVkQueueFamilyIndices
+{
     int32_t graphics;
     int32_t present;
 } QEMUVkQueueFamilyIndices;
 
-
-typedef struct QEMUVkPhysicalDevice {
+typedef struct QEMUVkPhysicalDevice
+{
+    VkSurfaceKHR surface;
     VkPhysicalDevice handle;
     QEMUVkQueueFamilyIndices queue_family_indices;
     VkPhysicalDeviceMemoryProperties memory_properties;
 } QEMUVkPhysicalDevice;
 
-
-typedef struct QEMUVkDevice {
+typedef struct QEMUVkDevice
+{
     QEMUVkPhysicalDevice physical_device;
     VkDevice handle;
     VkQueue graphics_queue;
@@ -28,7 +30,8 @@ typedef struct QEMUVkDevice {
     VkCommandBuffer general_command_buffer;
 } QEMUVkDevice;
 
-typedef struct QEMUVkSwapchain {
+typedef struct QEMUVkSwapchain
+{
     VkSwapchainKHR handle;
     VkFormat format;
     VkExtent2D extent;
@@ -37,13 +40,32 @@ typedef struct QEMUVkSwapchain {
     VkImageView *views;
 } QEMUVkSwapchain;
 
-typedef struct QEMUVulkanContext {
+typedef struct QEMUVkBuffer
+{
+    VkBuffer handle;
+    VkDeviceMemory memory;
+} QEMUVkBuffer;
+
+typedef struct QEMUVulkanContext
+{
     VkInstance instance;
     QEMUVkPhysicalDevice physical_device;
     QEMUVkDevice device;
     VkSurfaceKHR surface;
     QEMUVkSwapchain swapchain;
 } QEMUVulkanContext;
+
+typedef struct QEMUVkFrames
+{
+    VkDescriptorPool desc_pool;
+    uint32_t frame_count;
+    uint32_t frame_index;
+    VkFramebuffer *framebuffers;
+    VkCommandBuffer *cmd_bufs;
+    VkDescriptorSet *desc_sets;
+} QEMUVkFrames;
+
+typedef struct QEMUVulkanShader QEMUVulkanShader;
 
 typedef struct vulkan_texture
 {
@@ -71,7 +93,13 @@ void vk_fb_destroy(VkDevice device, vulkan_fb *fb);
 VkInstance vk_create_instance(void);
 QEMUVkPhysicalDevice vk_get_physical_device(VkInstance i, VkSurfaceKHR s);
 QEMUVkDevice vk_create_device(VkInstance i, QEMUVkPhysicalDevice pd);
-QEMUVkSwapchain vk_create_swapchain(QEMUVkPhysicalDevice pd, VkDevice d, VkSurfaceKHR s);
+QEMUVkSwapchain vk_create_swapchain(QEMUVkDevice d, VkSwapchainKHR old_swapchain);
+void vk_swapchain_recreate(QEMUVkDevice device, QEMUVkSwapchain *swapchain);
+
+VkFramebuffer vk_create_framebuffer(VkDevice device, VkRenderPass render_pass, VkImageView view, uint32_t width, uint32_t height);
+
+/// Creates `swapchain.image_count` frames
+QEMUVkFrames vk_create_frames(QEMUVkDevice device, QEMUVkSwapchain swapchain, QEMUVulkanShader *shader);
 
 QEMUVkDevice vk_init(void);
 
@@ -80,10 +108,20 @@ VkSurfaceKHR qemu_vk_init_surface_x11(VkInstance instance, Display *dpy, Window 
 int qemu_vk_init_dpy_wayland(struct wl_display *dpy, struct wl_surface *s);
 int qemu_vk_init_dpy_x11(Display *dpy, Window w);
 
-
 QEMUVulkanContext vk_create_context(void);
 void vk_destroy_context(QEMUVulkanContext ctx);
 
-VkCommandBuffer vk_command_buffer_begin(VkCommandBuffer command_buffer, VkCommandBufferUsageFlags flags);
+void vk_command_buffer_begin(VkCommandBuffer command_buffer, VkCommandBufferUsageFlags flags);
+
+uint32_t get_memory_type_index(QEMUVkPhysicalDevice physical_device,
+                               uint32_t memory_type_filter,
+                               VkMemoryPropertyFlags memory_property_flags);
+
+QEMUVkBuffer vk_create_buffer(QEMUVkDevice device,
+                              VkDeviceSize size,
+                              VkBufferUsageFlags usage,
+                              VkMemoryPropertyFlags memory_properties);
+
+void vk_destroy_buffer(VkDevice device, QEMUVkBuffer buffer);
 
 #endif // VULKAN_HELPERS_H

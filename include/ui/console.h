@@ -465,14 +465,13 @@ void surface_gl_setup_viewport(QemuGLShader *gls,
 bool console_vk_check_format(pixman_format_code_t format);
 void surface_vk_create_texture(QEMUVkDevice device,
                                DisplaySurface *surface);
-void surface_vk_update_texture(VkCommandBuffer cmdbuf,
+void surface_vk_update_texture(QEMUVkDevice device,
                                QEMUVulkanShader *vks,
                                DisplaySurface *surface,
                                int x, int y, int w, int h);
 void surface_vk_render_texture(QEMUVkDevice device,
-                               QEMUVkSwapchain swapchain,
-                               vulkan_fb *fb,
-                               VkCommandBuffer cmdbuf,
+                               QEMUVkSwapchain *swapchain,
+                               QEMUVkFrames *frames,
                                QEMUVulkanShader *vks,
                                DisplaySurface *surface);
 void surface_vk_destroy_texture(VkDevice device,
