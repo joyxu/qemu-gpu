@@ -83,7 +83,8 @@ qemu_vk_init_texture_blit_vertex_buffer(VkDevice device)
 void qemu_vk_run_texture_blit(VkCommandBuffer cmdbuf, QEMUVulkanShader *vks, bool flip)
 {
     vkCmdBindPipeline(cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, flip ? vks->texture_blit_flip_pipeline : vks->texture_blit_pipeline);
-    vkCmdBindVertexBuffers(cmdbuf, 0, 1, vks->texture_blit_vertex_buffer, 0);
+    const VkDeviceSize offsets[] = { 0 };
+    vkCmdBindVertexBuffers(cmdbuf, 0, 1, &vks->texture_blit_vertex_buffer, offsets);
     vkCmdDraw(cmdbuf, 4, 1, 0, 0);
 }
 
@@ -300,12 +301,26 @@ static VkRenderPass qemu_vk_init_texture_blit_render_pass(VkDevice device, VkFor
         .pColorAttachments = &color_attachment_ref,
     };
 
+    // Describes the transition for the color attachment
+    VkSubpassDependency subpass_dependency = {
+        .srcSubpass = VK_SUBPASS_EXTERNAL,
+        .dstSubpass = 0,
+        // Wait until we are in the color attachment output stage
+        .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask = 0,
+        // Transition before writing to the color attachment
+        .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+    };
+
     VkRenderPassCreateInfo render_pass_create_info = {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
         .attachmentCount = 1,
         .pAttachments = &color_attachment,
         .subpassCount = 1,
         .pSubpasses = &subpass,
+        .dependencyCount = 1,
+        .pDependencies = &subpass_dependency,
     };
 
     VkRenderPass render_pass;

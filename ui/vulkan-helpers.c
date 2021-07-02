@@ -76,15 +76,15 @@ void vk_fb_destroy(VkDevice device, vulkan_fb *fb)
 // Default framebuffer is the one using the swapchain images
 void vk_fb_setup_default(VkDevice device, QEMUVkSwapchain swapchain, VkRenderPass render_pass, vulkan_fb *fb, int width, int height)
 {
-    g_assert(width == swapchain.extent.width && height == swapchain.extent.height);
+    //g_assert(width == swapchain.extent.width && height == swapchain.extent.height);
 
     if (fb->framebuffers != NULL) {
         return; // TODO: already setup?
     }
 
     fb->texture = (vulkan_texture) {
-        .width = width,
-        .height = height,
+        .width = swapchain.extent.width,
+        .height = swapchain.extent.height,
         .image = VK_NULL_HANDLE,
         .view = VK_NULL_HANDLE,
         // Do not delete image when destroying this framebuffer as it is a managed swapchain image
@@ -679,4 +679,13 @@ QEMUVulkanContext vk_create_context(void)
     ctx.device = vk_create_device(ctx.instance, ctx.physical_device);
 
     return ctx;
+}
+
+VkCommandBuffer vk_command_buffer_begin(VkCommandBuffer command_buffer, VkCommandBufferUsageFlags flags) {
+    VkCommandBufferBeginInfo command_buffer_begin_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = flags,
+    };
+
+    VK_CHECK(vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info));
 }

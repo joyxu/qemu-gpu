@@ -469,7 +469,10 @@ void surface_vk_update_texture(VkCommandBuffer cmdbuf,
                                QEMUVulkanShader *vks,
                                DisplaySurface *surface,
                                int x, int y, int w, int h);
-void surface_vk_render_texture(VkCommandBuffer cmdbuf,
+void surface_vk_render_texture(QEMUVkDevice device,
+                               QEMUVkSwapchain swapchain,
+                               vulkan_fb *fb,
+                               VkCommandBuffer cmdbuf,
                                QEMUVulkanShader *vks,
                                DisplaySurface *surface);
 void surface_vk_destroy_texture(VkDevice device,

@@ -35,7 +35,6 @@ typedef struct QEMUVkSwapchain {
     uint32_t image_count;
     VkImage *images;
     VkImageView *views;
-    VkFramebuffer *framebuffers;
 } QEMUVkSwapchain;
 
 typedef struct QEMUVulkanContext {
@@ -84,5 +83,7 @@ int qemu_vk_init_dpy_x11(Display *dpy, Window w);
 
 QEMUVulkanContext vk_create_context(void);
 void vk_destroy_context(QEMUVulkanContext ctx);
+
+VkCommandBuffer vk_command_buffer_begin(VkCommandBuffer command_buffer, VkCommandBufferUsageFlags flags);
 
 #endif // VULKAN_HELPERS_H

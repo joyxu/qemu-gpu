@@ -87,15 +87,25 @@ void gd_vk_draw(VirtualConsole *vc)
         if (!vc->gfx.ds) {
             return;
         }
-        /*
-        eglMakeCurrent(qemu_egl_display, vc->gfx.esurface,
-                       vc->gfx.esurface, vc->gfx.ectx);
 
-        surface_gl_setup_viewport(vc->gfx.gls, vc->gfx.ds, ww, wh);
-        surface_gl_render_texture(vc->gfx.gls, vc->gfx.ds);
 
-        eglSwapBuffers(qemu_egl_display, vc->gfx.esurface);
-        */
+        VkCommandBuffer cmd_buf;
+        VkCommandBufferAllocateInfo cmd_buf_alloc_info = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .commandPool = vc->gfx.vk_device.command_pool,
+            .commandBufferCount = 1,
+            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        };
+        vkAllocateCommandBuffers(vc->gfx.vk_device.handle, &cmd_buf_alloc_info, &cmd_buf);
+
+        vk_command_buffer_begin(cmd_buf, 0);
+
+        surface_vk_setup_viewport(cmd_buf, vc->gfx.ds, ww, wh);
+        surface_vk_render_texture(vc->gfx.vk_device, vc->gfx.vk_swapchain, &vc->gfx.win_vk_fb, cmd_buf, vc->gfx.vks, vc->gfx.ds);
+
+        vkFreeCommandBuffers(vc->gfx.vk_device.handle, vc->gfx.vk_device.command_pool, 1, &cmd_buf);
+        //eglSwapBuffers(qemu_egl_display, vc->gfx.esurface);
+        // TODO present here?
 
         vc->gfx.scale_x = (double)ww / surface_width(vc->gfx.ds);
         vc->gfx.scale_y = (double)wh / surface_height(vc->gfx.ds);
@@ -139,7 +149,11 @@ void gd_vk_refresh(DisplayChangeListener *dcl)
         }
         vc->gfx.vks = qemu_vk_init_shader(vc->gfx.vk_device.handle, vc->gfx.vk_swapchain.format);
         if (vc->gfx.ds) {
-           surface_vk_create_texture(vc->gfx.vk_device, vc->gfx.ds);
+            surface_vk_create_texture(vc->gfx.vk_device, vc->gfx.ds);
+            // TODO create framebuffer this way?
+            int ww = surface_width(vc->gfx.ds);
+            int wh = surface_height(vc->gfx.ds);
+            vk_fb_setup_default(vc->gfx.vk_device.handle, vc->gfx.vk_swapchain, vc->gfx.vks->texture_blit_render_pass, &vc->gfx.win_vk_fb, ww, wh);
         }
     }
 
