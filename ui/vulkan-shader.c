@@ -167,8 +167,8 @@ static VkPipeline qemu_vk_create_graphics_pipeline(VkDevice device, VkShaderModu
 
     // TODO use parameters instead of magic numbers
     VkExtent2D extent = {
-        .width = 2880,
-        .height = 1600,
+        .width = 1920,
+        .height = 1440,
     };
 
     VkViewport viewport = {
@@ -217,7 +217,7 @@ static VkPipeline qemu_vk_create_graphics_pipeline(VkDevice device, VkShaderModu
 
     VkPipelineDynamicStateCreateInfo dynamic_state = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-        .dynamicStateCount = 1,
+        .dynamicStateCount = 2,
         .pDynamicStates = dynamic_states,
     };
 

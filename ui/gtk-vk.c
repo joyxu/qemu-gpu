@@ -60,7 +60,7 @@ void gd_vk_init(VirtualConsole *vc)
     VkSurfaceKHR vk_surface = qemu_vk_init_surface_x11(vc->gfx.vk_instance, dpy, x11_window);
     QEMUVkPhysicalDevice physical_device = vk_get_physical_device(vc->gfx.vk_instance, vk_surface);
     vc->gfx.vk_device = vk_create_device(vc->gfx.vk_instance, physical_device);
-    vc->gfx.vk_swapchain = vk_create_swapchain(vc->gfx.vk_device, VK_NULL_HANDLE);
+    vc->gfx.vk_swapchain = vk_create_swapchain(vc->gfx.vk_device, VK_NULL_HANDLE, 0, 0);
 }
 
 void gd_vk_draw(VirtualConsole *vc)
@@ -109,13 +109,7 @@ void gd_vk_update(DisplayChangeListener *dcl,
         return;
     }
 
-    // TODO recreate swapchain?
-/*
-    eglMakeCurrent(qemu_egl_display, vc->gfx.esurface,
-                   vc->gfx.esurface, vc->gfx.ectx);
-                   */
-    
-    surface_vk_update_texture(vc->gfx.vk_device, vc->gfx.vks, vc->gfx.ds, x, y, w, h);
+    surface_vk_update_texture(vc->gfx.vk_device, vc->gfx.ds, x, y, w, h);
     vc->gfx.glupdates++;
 }
 
@@ -126,8 +120,6 @@ void gd_vk_refresh(DisplayChangeListener *dcl)
     vc->gfx.dcl.update_interval = gd_monitor_update_interval(
             vc->window ? vc->window : vc->gfx.drawing_area);
 
-// TODO: vulkan surface?
-
     if (vc->gfx.vk_device.handle == VK_NULL_HANDLE) {
         gd_vk_init(vc);
         if (vc->gfx.vk_device.handle == VK_NULL_HANDLE) {
@@ -137,10 +129,6 @@ void gd_vk_refresh(DisplayChangeListener *dcl)
         if (vc->gfx.ds) {
             surface_vk_create_texture(vc->gfx.vk_device, vc->gfx.ds);
             vc->gfx.vk_frames = vk_create_frames(vc->gfx.vk_device, vc->gfx.vk_swapchain, vc->gfx.vks);
-            // TODO create framebuffer this way? No?
-            //int ww = surface_width(vc->gfx.ds);
-            //int wh = surface_height(vc->gfx.ds);
-            //vk_fb_setup_default(vc->gfx.vk_device.handle, vc->gfx.vk_swapchain, vc->gfx.vks->texture_blit_render_pass, &vc->gfx.win_vk_fb, ww, wh);
         }
     }
 
@@ -284,7 +272,7 @@ void gd_vk_scanout_flush(DisplayChangeListener *dcl,
     window = gtk_widget_get_window(vc->gfx.drawing_area);
     ww = gdk_window_get_width(window);
     wh = gdk_window_get_height(window);
-    vk_fb_setup_default(vc->gfx.vk_device.handle, vc->gfx.vk_swapchain, vc->gfx.vks->texture_blit_render_pass, &vc->gfx.win_vk_fb, ww, wh);
+    vk_fb_setup_default(vc->gfx.vk_device, &vc->gfx.vk_swapchain, &vc->gfx.vk_frames, vc->gfx.vks->texture_blit_render_pass, ww, wh);
     // TODO acquire next image?
 
     if (vc->gfx.cursor_fb.texture) {
@@ -295,7 +283,7 @@ void gd_vk_scanout_flush(DisplayChangeListener *dcl,
         //                  vc->gfx.cursor_x, vc->gfx.cursor_y,
         //                  vc->gfx.scale_x, vc->gfx.scale_y);
     } else {
-        //vk_fb_blit(&vc->gfx.win_fb, &vc->gfx.guest_fb, !vc->gfx.y0_top);
+       // vk_fb_blit(&vc->gfx.win_fb, &vc->gfx.guest_fb, !vc->gfx.y0_top);
     }
 
     // TODO: present
@@ -329,15 +317,4 @@ void gtk_vk_init()
 #endif
 
     display_vulkan = 1;
-}
-
-int gd_vk_make_current(DisplayChangeListener *dcl,
-                        QEMUVulkanContext ctx)
-{
-    VirtualConsole *vc = container_of(dcl, VirtualConsole, gfx.dcl);
-
-    // TODO should we do something in Vulkan? I believe not.
-    // return eglMakeCurrent(qemu_egl_display, vc->gfx.esurface,
-    //                      vc->gfx.esurface, ctx);
-    return 0;
 }

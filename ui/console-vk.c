@@ -111,11 +111,11 @@ static void vk_image_transition(VkCommandBuffer cmd_buf, VkImage image, VkImageL
 }
 
 
-static void vk_copy_buffer_to_image(VkCommandBuffer cmd_buf, VkBuffer buffer, VkImage image, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+static void vk_copy_buffer_to_image(VkCommandBuffer cmd_buf, VkBuffer buffer, uint32_t buffer_row_length, VkImage image, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
 {
     VkBufferImageCopy buffer_image_copy = {
         .bufferOffset = 0,
-        .bufferRowLength = 0,
+        .bufferRowLength = buffer_row_length,
         .bufferImageHeight = 0,
         .imageSubresource = {
             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -205,7 +205,7 @@ void surface_vk_create_texture(QEMUVkDevice device,
             .levelCount = 1,
             .baseArrayLayer = 0,
             .layerCount = 1,
-        }
+        },
     };
 
     VK_CHECK(vkCreateImageView(device.handle, &view_create_info, NULL, &surface->vk_view));
@@ -220,31 +220,10 @@ void surface_vk_create_texture(QEMUVkDevice device,
 
     uint32_t width = surface_width(surface);
     uint32_t height = surface_height(surface);
-    uint32_t surface_size = surface_bytes_per_pixel(surface) * width * height;
-
-    // TODO upload data from surface to a staging buffer then to the image
-    QEMUVkBuffer staging_buffer = vk_create_buffer(device, surface_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-    void* data;
-    VK_CHECK(vkMapMemory(device.handle, staging_buffer.memory, 0, surface_size, 0, &data));
-    memcpy(data, surface_data(surface), surface_size);
-    vkUnmapMemory(device.handle, staging_buffer.memory);
-
-    // TODO need a command buffer for a graphics queue
-    vk_command_buffer_begin(device.general_command_buffer, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-
-    vk_image_transition(device.general_command_buffer, surface->vk_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-    vk_copy_buffer_to_image(device.general_command_buffer, staging_buffer.handle, surface->vk_image, 0, 0, width, height);
-    vk_image_transition(device.general_command_buffer, surface->vk_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-    vk_command_buffer_submit(&device.general_command_buffer, device.graphics_queue);
-
-    vk_destroy_buffer(device.handle, staging_buffer);
+    surface_vk_update_texture(device, surface, 0, 0, width, height);
 }
 
 void surface_vk_update_texture(QEMUVkDevice device,
-                               QEMUVulkanShader *vks,
                                DisplaySurface *surface,
                                int x, int y, int w, int h)
 {
@@ -252,11 +231,9 @@ void surface_vk_update_texture(QEMUVkDevice device,
         + surface_stride(surface) * y
         + surface_bytes_per_pixel(surface) * x;
 
-    // TODO need a command buffer for a graphics queue
-    // TODO upload data from surface to a staging buffer then to the image
     uint32_t width = w;
     uint32_t height = h;
-    uint32_t surface_size = surface_bytes_per_pixel(surface) * width * height;
+    uint32_t surface_size = surface_stride(surface) * height;
     QEMUVkBuffer staging_buffer = vk_create_buffer(device, surface_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
@@ -265,11 +242,13 @@ void surface_vk_update_texture(QEMUVkDevice device,
     memcpy(data, pixel_data, surface_size);
     vkUnmapMemory(device.handle, staging_buffer.memory);
 
-    // TODO need a command buffer for a graphics queue
     vk_command_buffer_begin(device.general_command_buffer, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
     vk_image_transition(device.general_command_buffer, surface->vk_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-    vk_copy_buffer_to_image(device.general_command_buffer, staging_buffer.handle, surface->vk_image, x, y, width, height);
+
+    // in texels
+    uint32_t buffer_row_length = surface_stride(surface) / surface_bytes_per_pixel(surface);
+    vk_copy_buffer_to_image(device.general_command_buffer, staging_buffer.handle, buffer_row_length, surface->vk_image, x, y, width, height);
     vk_image_transition(device.general_command_buffer, surface->vk_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
     vk_command_buffer_submit(&device.general_command_buffer, device.graphics_queue);
@@ -326,8 +305,8 @@ void surface_vk_render_texture(QEMUVkDevice device,
         .framebuffer = frames->framebuffers[frames->frame_index],
         .renderArea = {
             .extent = {
-                .width = swapchain->extent.width, //surface_width(surface),
-                .height = swapchain->extent.height, //surface_height(surface),
+                .width = swapchain->extent.width,
+                .height = swapchain->extent.height,
             }
         },
         .clearValueCount = 1,
@@ -355,7 +334,7 @@ void surface_vk_render_texture(QEMUVkDevice device,
 
     if (acquire_res == VK_ERROR_OUT_OF_DATE_KHR) {
         // TODO extract to function
-        vk_swapchain_recreate(device, swapchain);
+        vk_swapchain_recreate(device, swapchain, 0, 0);
 
         for (uint32_t i = 0; i < swapchain->image_count; ++i) {
             vkDestroyFramebuffer(device.handle, frames->framebuffers[i], NULL);
@@ -402,7 +381,7 @@ void surface_vk_render_texture(QEMUVkDevice device,
 
     VkResult present_res = vkQueuePresentKHR(device.present_queue, &present_info);
     if (present_res == VK_ERROR_OUT_OF_DATE_KHR) {
-        vk_swapchain_recreate(device, swapchain);
+        vk_swapchain_recreate(device, swapchain, 0, 0);
 
         for (uint32_t i = 0; i < swapchain->image_count; ++i) {
             vkDestroyFramebuffer(device.handle, frames->framebuffers[i], NULL);
@@ -441,6 +420,9 @@ void surface_vk_setup_viewport(VkCommandBuffer cmdbuf,
                                DisplaySurface *surface,
                                int ww, int wh)
 {
+    ww *= 3;
+    wh *= 3;
+
     int gw, gh, stripe;
     float sw, sh;
 
@@ -469,12 +451,6 @@ void surface_vk_setup_viewport(VkCommandBuffer cmdbuf,
         viewport.height = wh;
     }
 
-    //viewport.x += viewport.width / 2;
-    //viewport.y += viewport.height / 2;
-    viewport.width *= 2;
-    viewport.height *= 4;
-    g_print("Viewport %f %f %f %f\n",viewport.x, viewport.y, viewport.width, viewport.height);
-
     vkCmdSetViewport(cmdbuf, 0, 1, &viewport);
 
     VkRect2D scissor = {
@@ -483,8 +459,8 @@ void surface_vk_setup_viewport(VkCommandBuffer cmdbuf,
             .height = viewport.height,
         },
         .offset = {
-            .x = 0,
-            .y = 0
+            .x = viewport.x,
+            .y = viewport.y
         }
     };
 

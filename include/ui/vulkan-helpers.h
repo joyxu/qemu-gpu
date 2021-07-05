@@ -87,14 +87,14 @@ typedef struct vulkan_fb
 
 void vk_fb_setup_for_tex(VkDevice device, vulkan_fb *fb, vulkan_texture texture);
 void vk_fb_setup_new_tex(VkDevice device, vulkan_fb *fb, int width, int height);
-void vk_fb_setup_default(VkDevice device, QEMUVkSwapchain swapchain, VkRenderPass render_pass, vulkan_fb *fb, int width, int height);
+void vk_fb_setup_default(QEMUVkDevice device, QEMUVkSwapchain *swapchain, QEMUVkFrames *frames, VkRenderPass render_pass, int width, int height);
 void vk_fb_destroy(VkDevice device, vulkan_fb *fb);
 
 VkInstance vk_create_instance(void);
 QEMUVkPhysicalDevice vk_get_physical_device(VkInstance i, VkSurfaceKHR s);
 QEMUVkDevice vk_create_device(VkInstance i, QEMUVkPhysicalDevice pd);
-QEMUVkSwapchain vk_create_swapchain(QEMUVkDevice d, VkSwapchainKHR old_swapchain);
-void vk_swapchain_recreate(QEMUVkDevice device, QEMUVkSwapchain *swapchain);
+QEMUVkSwapchain vk_create_swapchain(QEMUVkDevice d, VkSwapchainKHR old_swapchain, uint32_t width, uint32_t height);
+void vk_swapchain_recreate(QEMUVkDevice device, QEMUVkSwapchain *swapchain, uint32_t width, uint32_t height);
 
 VkFramebuffer vk_create_framebuffer(VkDevice device, VkRenderPass render_pass, VkImageView view, uint32_t width, uint32_t height);
 

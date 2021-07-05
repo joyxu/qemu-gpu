@@ -637,7 +637,7 @@ static const DisplayChangeListenerOps dcl_vk_ops = {
 
     .dpy_gl_ctx_create       = gd_vk_create_context,
     //.dpy_gl_ctx_destroy      = qemu_vk_destroy_context,
-    .dpy_gl_ctx_make_current = gd_vk_make_current,
+    .dpy_gl_ctx_make_current = NULL,
     .dpy_gl_scanout_disable  = gd_vk_scanout_disable,
     .dpy_gl_scanout_texture  = gd_vk_scanout_texture,
     .dpy_gl_scanout_dmabuf   = gd_vk_scanout_dmabuf,

@@ -28,10 +28,6 @@
 
 #define VK_CHECK(res) g_assert(res == VK_SUCCESS)
 
-// TODO where do we destroy these?
-//VkInstance instance;
-//VkDevice device;
-
 /* -- */
 
 static void vk_texture_destroy(VkDevice device, vulkan_texture *texture)
@@ -77,44 +73,16 @@ void vk_fb_destroy(VkDevice device, vulkan_fb *fb)
 }
 
 // Default framebuffer is the one using the swapchain images
-void vk_fb_setup_default(VkDevice device, QEMUVkSwapchain swapchain, VkRenderPass render_pass, vulkan_fb *fb, int width, int height)
+void vk_fb_setup_default(QEMUVkDevice device, QEMUVkSwapchain *swapchain, QEMUVkFrames *frames, VkRenderPass render_pass, int width, int height)
 {
-    //g_assert(width == swapchain.extent.width && height == swapchain.extent.height);
+    if (width != swapchain->extent.width || height != swapchain->extent.height) {
+        vk_swapchain_recreate(device, swapchain, width, height);
 
-    /*
-    if (fb->framebuffers != NULL)
-    {
-        return; // TODO: already setup?
+        for (uint32_t i = 0; i < swapchain->image_count; ++i) {
+            vkDestroyFramebuffer(device.handle, frames->framebuffers[i], NULL);
+            frames->framebuffers[i] = vk_create_framebuffer(device.handle, render_pass, swapchain->views[i], swapchain->extent.width, swapchain->extent.height);
+        }
     }
-
-    fb->texture = (vulkan_texture){
-        .width = swapchain.extent.width,
-        .height = swapchain.extent.height,
-        .image = VK_NULL_HANDLE,
-        .view = VK_NULL_HANDLE,
-        // Do not delete image when destroying this framebuffer as it is a managed swapchain image
-        .delete_image = false,
-    };
-
-    fb->framebuffer_count = swapchain.image_count;
-    fb->framebuffers = g_new(VkFramebuffer, fb->framebuffer_count);
-
-    for (uint32_t i = 0; i < swapchain.image_count; ++i)
-    {
-        VkImageView attachments[] = {swapchain.views[i]};
-        VkFramebufferCreateInfo framebuffer_create_info = {
-            .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-            .renderPass = render_pass,
-            .attachmentCount = 1,
-            .pAttachments = attachments,
-            .width = width,
-            .height = height,
-            .layers = 1,
-        };
-
-        VK_CHECK(vkCreateFramebuffer(device, &framebuffer_create_info, NULL, &fb->framebuffers[i]));
-    }
-    */
 }
 
 void vk_fb_setup_for_tex(VkDevice device, vulkan_fb *fb, vulkan_texture texture)
@@ -151,7 +119,7 @@ void vk_fb_setup_new_tex(VkDevice device, vulkan_fb *fb, int width, int height)
     };
 
     // TODO find the right format
-    VkFormat format = VK_FORMAT_R8G8B8A8_SRGB;
+    VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
 
     VkImageCreateInfo image_create_info = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -217,6 +185,7 @@ VkInstance vk_create_instance(void)
 
     const char *extension_names[] = {
         VK_KHR_SURFACE_EXTENSION_NAME,
+        // TODO conditionally include wayland or x extension
         //VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
         VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
         VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
@@ -388,7 +357,7 @@ QEMUVkDevice vk_create_device(VkInstance instance, QEMUVkPhysicalDevice physical
 {
     VkPhysicalDeviceProperties device_properties;
     vkGetPhysicalDeviceProperties(physical_device.handle, &device_properties);
-    g_print("Bringing up Vulkan on %s\n", device_properties.deviceName);
+    g_print("Initializing Vulkan on %s\n", device_properties.deviceName);
 
     const float default_queue_priority = 1.0f;
 
@@ -590,7 +559,7 @@ static VkSurfaceFormatKHR get_swapchain_format(QEMUVkPhysicalDevice physical_dev
 
     for (uint32_t i = 0; i < format_count; ++i)
     {
-        if (formats[i].format == VK_FORMAT_B8G8R8A8_SRGB && formats[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+        if (formats[i].format == VK_FORMAT_B8G8R8A8_UNORM)
         {
             format = formats[i];
             break;
@@ -624,12 +593,20 @@ static VkPresentModeKHR get_swapchain_present_mode(QEMUVkPhysicalDevice physical
     return present_mode;
 }
 
-QEMUVkSwapchain vk_create_swapchain(QEMUVkDevice device, VkSwapchainKHR old_swapchain)
+QEMUVkSwapchain vk_create_swapchain(QEMUVkDevice device, VkSwapchainKHR old_swapchain, uint32_t width, uint32_t height)
 {
     VkSurfaceCapabilitiesKHR capabilities = {};
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device.physical_device.handle, device.physical_device.surface, &capabilities);
 
-    VkExtent2D extent = get_swapchain_extent(&capabilities);
+    VkExtent2D extent = {
+        .width = width,
+        .height = height,
+    };
+    
+    if (width == 0 || height == 0) {
+        extent = get_swapchain_extent(&capabilities);
+    }
+
     uint32_t image_count = capabilities.minImageCount;
     if (capabilities.maxImageCount > 0 && image_count > capabilities.maxImageCount)
     {
@@ -699,7 +676,7 @@ QEMUVkSwapchain vk_create_swapchain(QEMUVkDevice device, VkSwapchainKHR old_swap
     return swapchain;
 }
 
-void vk_destroy_swapchain(VkDevice device, QEMUVkSwapchain *swapchain)
+static void vk_destroy_swapchain(VkDevice device, QEMUVkSwapchain *swapchain)
 {
     // TODO: Wait for any frame still rendering
     vkDeviceWaitIdle(device);
@@ -721,7 +698,7 @@ void vk_destroy_swapchain(VkDevice device, QEMUVkSwapchain *swapchain)
     swapchain->handle = VK_NULL_HANDLE;
 }
 
-void vk_swapchain_recreate(QEMUVkDevice device, QEMUVkSwapchain *swapchain)
+void vk_swapchain_recreate(QEMUVkDevice device, QEMUVkSwapchain *swapchain, uint32_t width, uint32_t height)
 {
     // TODO: Wait for any frame still rendering
     vkDeviceWaitIdle(device.handle);
@@ -734,7 +711,7 @@ void vk_swapchain_recreate(QEMUVkDevice device, QEMUVkSwapchain *swapchain)
     g_free(swapchain->views);
     g_free(swapchain->images);
 
-    *swapchain = vk_create_swapchain(device, swapchain->handle);
+    *swapchain = vk_create_swapchain(device, swapchain->handle, width, height);
 }
 
 VkFramebuffer vk_create_framebuffer(VkDevice device, VkRenderPass render_pass, VkImageView view, uint32_t width, uint32_t height)
@@ -776,7 +753,7 @@ static VkDescriptorPool vk_create_descriptor_pool(VkDevice device, uint32_t desc
     return descriptor_pool;
 }
 
-VkDescriptorSet vk_allocate_descriptor_set(VkDevice device, VkDescriptorPool desc_pool, VkDescriptorSetLayout set_layout)
+static VkDescriptorSet vk_allocate_descriptor_set(VkDevice device, VkDescriptorPool desc_pool, VkDescriptorSetLayout set_layout)
 {
     VkDescriptorSetAllocateInfo desc_set_alloc_info = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
