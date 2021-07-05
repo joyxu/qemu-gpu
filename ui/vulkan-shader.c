@@ -162,7 +162,7 @@ static VkPipeline qemu_vk_create_graphics_pipeline(VkDevice device, VkShaderModu
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP,
     };
 
     // TODO use parameters instead of magic numbers
