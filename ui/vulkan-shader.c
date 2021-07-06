@@ -298,15 +298,18 @@ static VkRenderPass qemu_vk_init_texture_blit_render_pass(VkDevice device, VkFor
     };
 
     // Describes the transition for the color attachment
-    VkSubpassDependency subpass_dependency = {
-        .srcSubpass = VK_SUBPASS_EXTERNAL,
-        .dstSubpass = 0,
-        // Wait until we are in the color attachment output stage
-        .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .srcAccessMask = 0,
-        // Transition before writing to the color attachment
-        .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+    VkSubpassDependency subpass_dependencies[] = {
+        {
+            .srcSubpass = VK_SUBPASS_EXTERNAL,
+            .dstSubpass = 0,
+            // Wait for the swapchain to read its image
+            .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .srcAccessMask = 0,
+            // Transition before writing to the color attachment
+            .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
+        }
     };
 
     VkRenderPassCreateInfo render_pass_create_info = {
@@ -316,7 +319,7 @@ static VkRenderPass qemu_vk_init_texture_blit_render_pass(VkDevice device, VkFor
         .subpassCount = 1,
         .pSubpasses = &subpass,
         .dependencyCount = 1,
-        .pDependencies = &subpass_dependency,
+        .pDependencies = subpass_dependencies,
     };
 
     VkRenderPass render_pass;
