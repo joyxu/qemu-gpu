@@ -186,7 +186,7 @@ VkInstance vk_create_instance(void)
     const char *extension_names[] = {
         VK_KHR_SURFACE_EXTENSION_NAME,
         // TODO conditionally include wayland or x extension
-        //VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
+        VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
         VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
         VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
     };
@@ -194,12 +194,15 @@ VkInstance vk_create_instance(void)
     VkInstanceCreateInfo instance_create_info = {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pApplicationInfo = &app_info,
-        .enabledExtensionCount = 2, // exclude debug report for the moment
+        .enabledExtensionCount = 3, // exclude debug report for the moment
         .ppEnabledExtensionNames = extension_names,
     };
 
-    const char *validation_layers[] = {"VK_LAYER_KHRONOS_validation"};
-    uint32_t layer_count = 1;
+    const char *validation_layers[] = {
+        "VK_LAYER_KHRONOS_validation",
+        "VK_LAYER_KHRONOS_synchronization2"
+    };
+    uint32_t layer_count = 2;
 
     // Check layers availability
     uint32_t instance_layer_count;
@@ -263,6 +266,11 @@ VkInstance vk_create_instance(void)
     return instance;
 }
 
+static bool support_graphics_and_present(QEMUVkQueueFamilyIndices indices)
+{
+    return indices.graphics >= 0 && indices.present >= 0;
+}
+
 /// Finds the graphics and present family indices
 static QEMUVkQueueFamilyIndices get_queue_family_indices(VkPhysicalDevice physical_device, VkSurfaceKHR surface)
 {
@@ -279,19 +287,21 @@ static QEMUVkQueueFamilyIndices get_queue_family_indices(VkPhysicalDevice physic
 
     for (uint32_t i = 0; i < queue_family_count; ++i)
     {
-        if (queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
+        if (indices.graphics < 0 && queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
         {
             indices.graphics = (int32_t)i;
         }
 
-        VkBool32 present_support = false;
-        vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, i, surface, &present_support);
-        if (present_support)
-        {
-            indices.present = (int32_t)i;
+        if (indices.present < 0) {
+            VkBool32 present_support = false;
+            vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, i, surface, &present_support);
+            if (present_support)
+            {
+                indices.present = (int32_t)i;
+            }
         }
 
-        if (indices.graphics >= 0 && indices.present >= 0)
+        if (support_graphics_and_present(indices))
         {
             break;
         }
@@ -299,11 +309,6 @@ static QEMUVkQueueFamilyIndices get_queue_family_indices(VkPhysicalDevice physic
 
     g_free(queue_families);
     return indices;
-}
-
-static bool support_graphics_and_present(QEMUVkQueueFamilyIndices indices)
-{
-    return indices.graphics >= 0 && indices.present >= 0;
 }
 
 QEMUVkPhysicalDevice vk_get_physical_device(VkInstance instance, VkSurfaceKHR surface)
@@ -397,6 +402,8 @@ QEMUVkDevice vk_create_device(VkInstance instance, QEMUVkPhysicalDevice physical
         .handle = VK_NULL_HANDLE,
         .graphics_queue = VK_NULL_HANDLE,
         .present_queue = VK_NULL_HANDLE,
+        .command_pool = VK_NULL_HANDLE,
+        .general_command_buffer = VK_NULL_HANDLE,
     };
 
     VK_CHECK(vkCreateDevice(physical_device.handle, &device_create_info, NULL, &device.handle));
@@ -429,8 +436,9 @@ QEMUVkDevice vk_init(void)
     return vk_create_device(instance, physical_device);
 }
 
-static VkSurfaceKHR vk_create_wayland_surface(VkInstance instance, struct wl_display *dpy, struct wl_surface *s)
+VkSurfaceKHR vk_create_wayland_surface(VkInstance instance, struct wl_display *dpy, struct wl_surface *s)
 {
+    g_print("Vulkan surface for Wayland\n");
     VkWaylandSurfaceCreateInfoKHR surface_create_info = {
         .sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR,
         .flags = 0,
@@ -438,13 +446,13 @@ static VkSurfaceKHR vk_create_wayland_surface(VkInstance instance, struct wl_dis
         .surface = s,
     };
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-
     VK_CHECK(vkCreateWaylandSurfaceKHR(instance, &surface_create_info, NULL, &surface));
     return surface;
 }
 
-VkSurfaceKHR qemu_vk_init_surface_x11(VkInstance instance, Display *dpy, Window w)
+VkSurfaceKHR vk_create_x11_surface(VkInstance instance, Display *dpy, Window w)
 {
+    g_print("Vulkan surface for X display: %s\n", XDisplayString(dpy));
     VkXlibSurfaceCreateInfoKHR surface_create_info = {
         .sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR,
         .flags = 0,
@@ -452,14 +460,8 @@ VkSurfaceKHR qemu_vk_init_surface_x11(VkInstance instance, Display *dpy, Window 
         .window = w,
     };
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-
     VK_CHECK(vkCreateXlibSurfaceKHR(instance, &surface_create_info, NULL, &surface));
     return surface;
-}
-
-static VkSurfaceKHR vk_create_x11_surface(VkInstance instance, Display *dpy, Window w)
-{
-    return qemu_vk_init_surface_x11(instance, dpy, w);
 }
 
 static int qemu_vk_init_dpy(VkDisplayKHR dpy,
@@ -525,28 +527,6 @@ static int qemu_vk_init_dpy(VkDisplayKHR dpy,
     return 0;
 }
 
-/// Initializes Vulkan for a wayland display
-int qemu_vk_init_dpy_wayland(struct wl_display *dpy, struct wl_surface *s)
-{
-    VkInstance instance = vk_create_instance();
-    vk_create_wayland_surface(instance, dpy, s);
-    return 0;
-}
-
-/// Initializes Vulkan for an X11 display
-int qemu_vk_init_dpy_x11(Display *dpy, Window w)
-{
-    VkInstance instance = vk_create_instance();
-    vk_create_x11_surface(instance, dpy, w);
-    return 0;
-}
-
-static VkExtent2D get_swapchain_extent(VkSurfaceCapabilitiesKHR *capabilities)
-{
-    g_assert(capabilities->currentExtent.width != UINT32_MAX);
-    return capabilities->currentExtent;
-}
-
 static VkSurfaceFormatKHR get_swapchain_format(QEMUVkPhysicalDevice physical_device)
 {
 
@@ -598,13 +578,13 @@ QEMUVkSwapchain vk_create_swapchain(QEMUVkDevice device, VkSwapchainKHR old_swap
     VkSurfaceCapabilitiesKHR capabilities = {};
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device.physical_device.handle, device.physical_device.surface, &capabilities);
 
-    VkExtent2D extent = {
-        .width = width,
-        .height = height,
-    };
+    VkExtent2D extent = capabilities.currentExtent;
     
-    if (width == 0 || height == 0) {
-        extent = get_swapchain_extent(&capabilities);
+    if (width != 0) {
+        extent.width = CLAMP(width, capabilities.minImageExtent.width, capabilities.maxImageExtent.height);
+    }
+    if (height != 0) {
+        extent.height = CLAMP(height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
     }
 
     uint32_t image_count = capabilities.minImageCount;
@@ -862,7 +842,8 @@ QEMUVkBuffer vk_create_buffer(QEMUVkDevice device,
     VkMemoryAllocateInfo memory_alloc_info = {
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
         .allocationSize = memory_requirements.size,
-        .memoryTypeIndex = get_memory_type_index(device.physical_device, memory_requirements.memoryTypeBits, memory_properties)};
+        .memoryTypeIndex = get_memory_type_index(device.physical_device, memory_requirements.memoryTypeBits, memory_properties),
+    };
 
     VK_CHECK(vkAllocateMemory(device.handle, &memory_alloc_info, NULL, &buffer.memory));
     VK_CHECK(vkBindBufferMemory(device.handle, buffer.handle, buffer.memory, 0));
@@ -874,4 +855,23 @@ void vk_destroy_buffer(VkDevice device, QEMUVkBuffer buffer)
 {
     vkDestroyBuffer(device, buffer.handle, NULL);
     vkFreeMemory(device, buffer.memory, NULL);
+}
+
+VkSemaphore vk_create_semaphore(VkDevice device)
+{
+    VkSemaphoreCreateInfo semaphore_create_info = {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    VkSemaphore semaphore;
+    VK_CHECK(vkCreateSemaphore(device, &semaphore_create_info, NULL, &semaphore));
+    return semaphore;
+}
+
+VkFence vk_create_fence(VkDevice device)
+{
+    VkFenceCreateInfo fence_create_info = {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+    };
+    VkFence fence = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateFence(device, &fence_create_info, NULL, &fence));
+    return fence;
 }

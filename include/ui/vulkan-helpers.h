@@ -103,10 +103,8 @@ QEMUVkFrames vk_create_frames(QEMUVkDevice device, QEMUVkSwapchain swapchain, QE
 
 QEMUVkDevice vk_init(void);
 
-VkSurfaceKHR qemu_vk_init_surface_x11(VkInstance instance, Display *dpy, Window w);
-
-int qemu_vk_init_dpy_wayland(struct wl_display *dpy, struct wl_surface *s);
-int qemu_vk_init_dpy_x11(Display *dpy, Window w);
+VkSurfaceKHR vk_create_x11_surface(VkInstance instance, Display *dpy, Window w);
+VkSurfaceKHR vk_create_wayland_surface(VkInstance instance, struct wl_display *dpy, struct wl_surface *s);
 
 QEMUVulkanContext vk_create_context(void);
 void vk_destroy_context(QEMUVulkanContext ctx);
@@ -123,5 +121,8 @@ QEMUVkBuffer vk_create_buffer(QEMUVkDevice device,
                               VkMemoryPropertyFlags memory_properties);
 
 void vk_destroy_buffer(VkDevice device, QEMUVkBuffer buffer);
+
+VkSemaphore vk_create_semaphore(VkDevice device);
+VkFence vk_create_fence(VkDevice device);
 
 #endif // VULKAN_HELPERS_H
