@@ -42,14 +42,6 @@ static void vk_gfx_switch(DisplayChangeListener *dcl,
     vdpy->ds = new_surface;
 }
 
-static QEMUGLContext egl_create_context(DisplayChangeListener *dcl,
-                                        QEMUGLParams *params)
-{
-    eglMakeCurrent(qemu_egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE,
-                   qemu_egl_rn_ctx);
-    return qemu_egl_create_context(dcl, params);
-}
-
 static void vk_scanout_disable(DisplayChangeListener *dcl)
 {
     vulkan_dpy *vdpy = container_of(dcl, vulkan_dpy, dcl);
@@ -168,7 +160,7 @@ static const DisplayChangeListenerOps vulkan_ops = {
     .dpy_gfx_switch = vk_gfx_switch,
 
 // Only needed by guest GL?
-    .dpy_gl_ctx_create = egl_create_context,
+    .dpy_gl_ctx_create = NULL,
     .dpy_gl_ctx_destroy = qemu_egl_destroy_context,
     .dpy_gl_ctx_make_current = qemu_egl_make_context_current,
 
