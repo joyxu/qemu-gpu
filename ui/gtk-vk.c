@@ -22,6 +22,8 @@
 
 #include "sysemu/sysemu.h"
 
+#define VK_CHECK(res) g_assert(res == VK_SUCCESS)
+
 static void gtk_vk_set_scanout_mode(VirtualConsole *vc, bool scanout)
 {
     if (vc->gfx.scanout_mode == scanout) {
@@ -41,6 +43,30 @@ static void gtk_vk_set_scanout_mode(VirtualConsole *vc, bool scanout)
 
 /** DisplayState Callbacks (opengl version) **/
 
+static VkSurfaceKHR gd_vk_create_surface(VkInstance instance, GdkWindow *gdk_window, GdkDisplay *gdk_display)
+{
+#if defined(GDK_WINDOWING_WAYLAND)
+    if (GDK_IS_WAYLAND_DISPLAY(gdk_display)) {
+        struct wl_display *wl_dpy = gdk_wayland_display_get_wl_display(gdk_display);
+        struct wl_surface *wl_surface = gdk_wayland_window_get_wl_surface(gdk_window);
+
+        return vk_create_wayland_surface(instance, wl_dpy, wl_surface);
+    }
+#endif
+
+#if defined(CONFIG_X11)
+    if (GDK_IS_X11_DISPLAY(gdk_display)) {
+        Display *x_display = gdk_x11_display_get_xdisplay(gdk_display);
+        Window x_window = gdk_x11_window_get_xid(gdk_window);
+
+        return vk_create_x11_surface(instance, x_display, x_window);
+    }
+#endif
+
+    g_assert(false);
+    return VK_NULL_HANDLE;
+}
+
 void gd_vk_init(VirtualConsole *vc)
 {
     GdkWindow *gdk_window = gtk_widget_get_window(vc->gfx.drawing_area);
@@ -48,19 +74,19 @@ void gd_vk_init(VirtualConsole *vc)
         return;
     }
 
-    Window x11_window = gdk_x11_window_get_xid(gdk_window);
-    if (!x11_window) {
+    GdkDisplay *gdk_display = gdk_window_get_display(gdk_window);
+    if (!gdk_display) {
         return;
     }
 
-    GdkDisplay *gdk_display = gdk_window_get_display(gdk_window);
-    Display *dpy = gdk_x11_display_get_xdisplay(gdk_display);
-
     vc->gfx.vk_instance = vk_create_instance();
-    VkSurfaceKHR vk_surface = qemu_vk_init_surface_x11(vc->gfx.vk_instance, dpy, x11_window);
+    VkSurfaceKHR vk_surface = gd_vk_create_surface(vc->gfx.vk_instance, gdk_window, gdk_display);
     QEMUVkPhysicalDevice physical_device = vk_get_physical_device(vc->gfx.vk_instance, vk_surface);
     vc->gfx.vk_device = vk_create_device(vc->gfx.vk_instance, physical_device);
-    vc->gfx.vk_swapchain = vk_create_swapchain(vc->gfx.vk_device, VK_NULL_HANDLE, 0, 0);
+
+    uint32_t width = gdk_window_get_width(gdk_window);
+    uint32_t height = gdk_window_get_height(gdk_window);
+    vc->gfx.vk_swapchain = vk_create_swapchain(vc->gfx.vk_device, VK_NULL_HANDLE, width, height);
 }
 
 void gd_vk_draw(VirtualConsole *vc)
@@ -85,11 +111,93 @@ void gd_vk_draw(VirtualConsole *vc)
         if (!vc->gfx.ds) {
             return;
         }
+        
+        QEMUVkDevice device = vc->gfx.vk_device;
+        QEMUVkSwapchain *swapchain = &vc->gfx.vk_swapchain;
+        QEMUVkFrames *frames = &vc->gfx.vk_frames;
+        QEMUVulkanShader *shader = vc->gfx.vks;
 
-        VkCommandBuffer cmd_buf = vc->gfx.vk_frames.cmd_bufs[vc->gfx.vk_frames.frame_index];
+        VkSemaphore image_available_semaphore = vk_create_semaphore(device.handle);
+        VkSemaphore render_finished_semaphore = vk_create_semaphore(device.handle);
+        VkFence fence = vk_create_fence(device.handle);
+
+        uint32_t image_index;
+        // Image available sempahore will be signaled once the image is correctly acquired
+        VkResult acquire_res = vkAcquireNextImageKHR(device.handle, swapchain->handle, UINT64_MAX, image_available_semaphore, VK_NULL_HANDLE, &image_index);
+        frames->frame_index = image_index;
+
+        if (acquire_res == VK_ERROR_OUT_OF_DATE_KHR)
+        {
+            // TODO extract to function
+            vk_swapchain_recreate(device, swapchain, 0, 0);
+
+            for (uint32_t i = 0; i < swapchain->image_count; ++i)
+            {
+                vkDestroyFramebuffer(device.handle, frames->framebuffers[i], NULL);
+                frames->framebuffers[i] = vk_create_framebuffer(device.handle, shader->texture_blit_render_pass, swapchain->views[i], swapchain->extent.width, swapchain->extent.height);
+            }
+
+            frames->frame_index = 0;
+
+            // TODO Skip this frame? Try acquiring the swapchain again?
+            return;
+        }
+
+        VkCommandBuffer cmd_buf = frames->cmd_bufs[frames->frame_index];
         vk_command_buffer_begin(cmd_buf, 0);
         surface_vk_setup_viewport(cmd_buf, vc->gfx.ds, ww, wh);
         surface_vk_render_texture(vc->gfx.vk_device, &vc->gfx.vk_swapchain, &vc->gfx.vk_frames, vc->gfx.vks, vc->gfx.ds);
+
+        // Wait the swapchain image has been acquired before writing color onto it
+        VkSemaphore wait_semaphores[] = {image_available_semaphore};
+        VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+
+        // Signal this semaphore once the commands have finished execution
+        VkSemaphore signal_semaphores[] = {render_finished_semaphore};
+
+        VkSubmitInfo submit_info = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .waitSemaphoreCount = 1,
+            .pWaitSemaphores = wait_semaphores,
+            .pWaitDstStageMask = wait_stages,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &cmd_buf,
+            .signalSemaphoreCount = 1,
+            .pSignalSemaphores = signal_semaphores,
+        };
+
+        VK_CHECK(vkQueueSubmit(device.graphics_queue, 1, &submit_info, fence));
+
+        VkPresentInfoKHR present_info = {
+            .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+            .waitSemaphoreCount = 1,
+            // Wait for commands to finish before presenting the result
+            .pWaitSemaphores = signal_semaphores,
+            .swapchainCount = 1,
+            .pSwapchains = &swapchain->handle,
+            .pImageIndices = &image_index,
+        };
+
+        VkResult present_res = vkQueuePresentKHR(device.present_queue, &present_info);
+        if (present_res == VK_ERROR_OUT_OF_DATE_KHR)
+        {
+            vk_swapchain_recreate(device, swapchain, 0, 0);
+
+            for (uint32_t i = 0; i < swapchain->image_count; ++i)
+            {
+                vkDestroyFramebuffer(device.handle, frames->framebuffers[i], NULL);
+                frames->framebuffers[i] = vk_create_framebuffer(device.handle, shader->texture_blit_render_pass, swapchain->views[i], swapchain->extent.width, swapchain->extent.height);
+            }
+
+            frames->frame_index = 0;
+            return;
+        }
+
+        VK_CHECK(vkQueueWaitIdle(device.present_queue));
+
+        vkDestroySemaphore(device.handle, image_available_semaphore, NULL);
+        vkDestroySemaphore(device.handle, render_finished_semaphore, NULL);
+        vkDestroyFence(device.handle, fence, NULL);
 
         vc->gfx.scale_x = (double)ww / surface_width(vc->gfx.ds);
         vc->gfx.scale_y = (double)wh / surface_height(vc->gfx.ds);
@@ -290,31 +398,7 @@ void gd_vk_scanout_flush(DisplayChangeListener *dcl,
     //eglSwapBuffers(qemu_egl_display, vc->gfx.esurface);
 }
 
-void gtk_vk_init()
+void gtk_vk_init(void)
 {
-    GdkDisplay *gdk_display = gdk_display_get_default();
-    GdkWindow *gdk_window = gdk_get_default_root_window();
-
-#if defined(GDK_WINDOWING_WAYLAND)
-    //if (GDK_IS_WAYLAND_DISPLAY(gdk_display)) {
-    //    struct wl_display *wl_dpy = gdk_wayland_display_get_wl_display(gdk_display);
-    //    struct wl_surface *wl_surface = gdk_wayland_window_get_wl_surface(gdk_window);
-//
-    //    if (qemu_vk_init_dpy_wayland(wl_dpy, wl_surface) < 0) {
-    //        return;
-    //    }
-    //}
-
-#elif defined(CONFIG_X11)
-    if (GDK_IS_X11_DISPLAY(gdk_display)) {
-        Display *x_display = gdk_x11_display_get_xdisplay(gdk_display);
-        Window x_window = gdk_x11_window_get_xid(gdk_window);
-
-        if (qemu_vk_init_dpy_x11(x_display, x_window) < 0) {
-            return;
-        }
-    }
-#endif
-
     display_vulkan = 1;
 }
