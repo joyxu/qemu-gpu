@@ -45,8 +45,8 @@ void gd_gl_area_draw(VirtualConsole *vc)
     }
 
     gtk_gl_area_make_current(GTK_GL_AREA(vc->gfx.drawing_area));
-    ww = gtk_widget_get_allocated_width(vc->gfx.drawing_area);
-    wh = gtk_widget_get_allocated_height(vc->gfx.drawing_area);
+    ww = 3 * gtk_widget_get_allocated_width(vc->gfx.drawing_area);
+    wh = 3 * gtk_widget_get_allocated_height(vc->gfx.drawing_area);
 
     if (vc->gfx.scanout_mode) {
         if (!vc->gfx.guest_fb.framebuffer) {
