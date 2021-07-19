@@ -479,10 +479,12 @@ if 'CONFIG_GBM' in config_host
 endif
 virgl = not_found
 if not get_option('virglrenderer').auto() or have_system
-  virgl = dependency('virglrenderer',
-                     method: 'pkg-config',
-                     required: get_option('virglrenderer'),
-                     kwargs: static_kwargs)
+  virglrenderer = dependency('virglrenderer',
+                             method: 'pkg-config',
+                             required: get_option('virglrenderer'),
+                             kwargs: static_kwargs)
+  virgl = declare_dependency(compile_args: '-DVIRGL_RENDERER_UNSTABLE_APIS',
+                             dependencies: virglrenderer)
 endif
 curl = not_found
 if not get_option('curl').auto() or have_block
