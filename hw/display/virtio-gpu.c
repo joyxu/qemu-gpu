@@ -941,10 +941,10 @@ void virtio_gpu_resource_assign_uuid(VirtIOGPU *g,
     virtio_gpu_bswap_32(&assign, sizeof(assign));
     trace_virtio_gpu_cmd_res_assign_uuid(assign.resource_id);
 
-    res = virtio_gpu_find_check_resource(g, assign.resource_id, false, __func__, &cmd->error);
-    if (!res) {
-        return;
-    }
+    //res = virtio_gpu_find_check_resource(g, assign.resource_id, false, __func__, &cmd->error);
+    //if (!res) {
+    //    return;
+    //}
 
     memset(&resp, 0, sizeof(resp));
     resp.hdr.type = VIRTIO_GPU_RESP_OK_RESOURCE_UUID;
