@@ -481,7 +481,7 @@ if not get_option('zstd').auto() or have_block
 endif
 virgl = not_found
 if not get_option('virglrenderer').auto() or have_system
-  virgl = dependency('virglrenderer',
+  virgl = dependency('virglrenderer', version: '>=0.9.0',
                      method: 'pkg-config',
                      required: get_option('virglrenderer'),
                      kwargs: static_kwargs)
